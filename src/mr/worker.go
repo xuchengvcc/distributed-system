@@ -34,7 +34,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 
 	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+	CallExample()
 
 }
 
@@ -58,7 +58,7 @@ func CallExample() {
 	// the "Coordinator.Example" tells the
 	// receiving server that we'd like to call
 	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
+	ok := call("Coordinator.Example", &args, &reply) //改成MyHandler处理函数
 	if ok {
 		// reply.Y should be 100.
 		fmt.Printf("reply.Y %v\n", reply.Y)
@@ -79,9 +79,9 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
-	defer c.Close()
+	defer c.Close() //在执行完call后关闭rpc连接
 
-	err = c.Call(rpcname, args, reply)
+	err = c.Call(rpcname, args, reply) // 这里执行了 Coordinator.Example 
 	if err == nil {
 		return true
 	}

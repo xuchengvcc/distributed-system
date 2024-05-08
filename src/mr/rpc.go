@@ -23,7 +23,11 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
-
+func myCoordinatorSock(key string) string {
+	s := "/var/tmp/5840-mr-"
+	s += key
+	return s
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
