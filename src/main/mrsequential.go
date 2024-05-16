@@ -6,13 +6,17 @@ package main
 // go run mrsequential.go wc.so pg*.txt
 //
 
-import "fmt"
-import "6.5840/mr"
-import "plugin"
-import "os"
-import "log"
-import "io/ioutil"
-import "sort"
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"plugin"
+	"sort"
+
+	"6.5840/mr"
+)
 
 // for sorting by key.
 type ByKey []mr.KeyValue
@@ -35,13 +39,24 @@ func main() {
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("获取当前目录失败:", err)
+		return
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, os.Args[2]))
+	if err != nil {
+		fmt.Println("匹配文件失败:", err)
+		return
+	}
 	intermediate := []mr.KeyValue{}
-	for _, filename := range os.Args[2:] {
+	for _, filename := range matches {
 		file, err := os.Open(filename)
 		if err != nil {
 			log.Fatalf("cannot open %v", filename)
 		}
-		content, err := ioutil.ReadAll(file)
+		content, err := io.ReadAll(file)
+		fmt.Printf("类型是：%T\n", content)
 		if err != nil {
 			log.Fatalf("cannot read %v", filename)
 		}
