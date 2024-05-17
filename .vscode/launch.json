@@ -10,8 +10,8 @@
             "request": "launch",
             "mode": "auto",
             "program": "${file}",
-            // "args":["pg-*.txt"],
-            "args":["wc.so","pg-*.txt"],
+            "args":["pg-*.txt"],
+            // "args":["wc.so","pg-*.txt"],
             // "args":["wc.so"]
         }
     ]

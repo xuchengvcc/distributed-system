@@ -35,14 +35,16 @@ type MasterTask struct {
 }
 
 type Task struct {
-	Id        int
-	FileName  string
-	TaskPhase Phase
-	NReducer  int
-	StartTime time.Time
-	EndTime   time.Time
-	next      *Task
-	pre       *Task
+	Id         int
+	FileName   string
+	OFileNames []string
+	TaskPhase  Phase
+	NReducer   int
+	NMapper    int
+	StartTime  time.Time
+	EndTime    time.Time
+	next       *Task
+	pre        *Task
 }
 
 type DubTaskList struct {
@@ -56,7 +58,7 @@ func (dtl *DubTaskList) addToTail(task *Task) {
 		log.Fatalf("任务为空，添加任务失败")
 	}
 	dtl.size++
-	if dtl.size == 0 {
+	if dtl.size == 1 {
 		dtl.head = task
 		dtl.tail = task
 		task.next = task
@@ -93,10 +95,11 @@ type Coordinator struct {
 	NReducer int
 	Phase    Phase //当前所处阶段
 	// TaskQueue chan *Task
-	TaskQueue DubTaskList
-	TaskMeta  map[int]*MasterTask
-	Files     []string
-	Mutex     sync.Mutex
+	TaskQueue      DubTaskList
+	TaskMeta       map[int]*MasterTask
+	Files          []string
+	InterFileNames [][]string
+	Mutex          sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -106,48 +109,73 @@ func (c *Coordinator) AssignTask(args *Args, reply *Reply) error {
 	defer c.Mutex.Unlock()
 	if c.TaskQueue.size > 0 {
 		task := c.TaskQueue.pickHead()
-		task.TaskPhase = Phase(Processing)
+		c.TaskMeta[task.Id].TaskState = Processing
 		task.StartTime = time.Now()
 		reply.Task = *task
 	} else {
-		if c.Phase == Map {
-			// 需要检查是否所有Map任务已经完成
-			completed := true
-			for _, masterTask := range c.TaskMeta {
-				completed = completed && (masterTask.TaskState == Completed)
-			}
-			if completed {
-				// TODO 需要分配Reduce任务
+		reply.Task = Task{
+			TaskPhase: Wait,
+		}
+		completed := c.checkCompleted()
+		if completed {
+			switch c.Phase {
+			case Map:
 				c.makeReduceTask()
-				reply.Task = *c.TaskQueue.pickHead()
-			} else {
+				c.Phase = Reduce
+			case Reduce:
+				c.Phase = Done
+			case Done:
 				reply.Task = Task{
-					TaskPhase: Wait,
+					TaskPhase: Done,
 				}
 			}
 		}
 	}
-
 	return nil
 }
 
-func (c *Coordinator) CompleteMap(args *Args, reply *Reply) {
-	// 处理Map任务完成
+func (c *Coordinator) CompleteTask(args *Args, reply *Reply) error {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
-	id := args.Task.Id
-	task := c.TaskMeta[id].Reference
-	if time.Since(task.StartTime) > OutTime {
-		// 任务超时，需要将任务重新插入队列
+	switch args.Task.TaskPhase {
+	case Map:
+		c.checkMapTask(&args.Task)
+	case Reduce:
+		c.checkReduceTask(&args.Task)
+	}
+	return nil
+}
+
+func (c *Coordinator) checkMapTask(task *Task) {
+	if c.Phase != Map {
+		// 当前任务作废
+
+	} else if time.Since(task.StartTime) > OutTime {
 		task.TaskPhase = Map
 		c.TaskQueue.addToTail(task)
-		c.TaskMeta[id].TaskState = Free
+		c.TaskMeta[task.Id].TaskState = Free
 	} else {
-		c.TaskMeta[id].TaskState = Completed
+		c.TaskMeta[task.Id].TaskState = Completed
+		c.InterFileNames[task.Id] = task.OFileNames
 		if c.checkCompleted() {
-			// TODO 需要开始构建Reduce任务列表
+			c.Phase = Reduce
 			c.makeReduceTask()
-			time.Sleep(time.Microsecond)
+		}
+	}
+}
+
+func (c *Coordinator) checkReduceTask(task *Task) {
+	if c.Phase != Reduce {
+		// 当前任务作废
+
+	} else if time.Since(task.StartTime) > OutTime {
+		task.TaskPhase = Reduce
+		c.TaskQueue.addToTail(task)
+		c.TaskMeta[task.Id].TaskState = Free
+	} else {
+		c.TaskMeta[task.Id].TaskState = Completed
+		if c.checkCompleted() {
+			c.Phase = Done
 		}
 	}
 }
@@ -175,18 +203,18 @@ func (c *Coordinator) server() {
 	rpc.HandleHTTP() // 注册HTTP路由
 	//l, e := net.Listen("tcp", ":1234")
 	sockname := coordinatorSock() // 获取一个socket-name
-	registerSockname := sockname + "_register"
+	// registerSockname := sockname + "_register"
 	os.Remove(sockname)
-	os.Remove(registerSockname)          //用于监听注册 worker
+	// os.Remove(registerSockname)          //用于监听注册 worker
 	l, e := net.Listen("unix", sockname) //创建了一个unix套接字，并监听，"unix"指定网络类型,l为监听对象
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
-	lReg, e := net.Listen("unix", registerSockname)
-	if e != nil {
-		log.Fatal("listen error:", e)
-	}
-	go http.Serve(lReg, nil)
+	// lReg, e := net.Listen("unix", registerSockname)
+	// if e != nil {
+	// 	log.Fatal("listen error:", e)
+	// }
+	// go http.Serve(lReg, nil)
 	go http.Serve(l, nil) // 启动一个HTTP服务器，第一个参数为实现了net.Listener接口的对象，第二个参数是http.Handler接口的实现，
 	// 'nil'表示使用默认 HTTP 处理器
 }
@@ -217,12 +245,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		return nil
 	}
 	c := Coordinator{
-		NReducer:  nReduce,
-		NMapper:   len(matches),
-		Files:     matches,
-		Phase:     0,
-		TaskQueue: DubTaskList{size: 0},
-		TaskMeta:  make(map[int]*MasterTask),
+		NReducer:       nReduce,
+		NMapper:        len(matches),
+		Files:          matches,
+		Phase:          Map,
+		TaskQueue:      DubTaskList{size: 0},
+		TaskMeta:       make(map[int]*MasterTask),
+		InterFileNames: make([][]string, len(matches)),
 	}
 
 	// Your code here.
@@ -235,7 +264,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 }
 
 func (c *Coordinator) makeMapTask() {
-	// 创建任务列表，每个文件构建一个任务
+	// 创建Map任务列表，每个文件构建一个任务
 	for idx, filename := range c.Files {
 		taskMap := Task{
 			FileName:  filename,
@@ -251,13 +280,23 @@ func (c *Coordinator) makeMapTask() {
 	}
 }
 
+func (c *Coordinator) getInterFileName(idx int) []string {
+	onames := make([]string, c.NMapper)
+	for i, InterFileName := range c.InterFileNames {
+		onames[i] = InterFileName[idx]
+	}
+	return onames
+}
+
 func (c *Coordinator) makeReduceTask() {
-	// 创建任务列表，每个文件构建一个任务
+	// 创建Reduce任务列表，文件名传给reducetask
 	for idx := range c.NReducer {
 		taskMap := Task{
-			TaskPhase: Phase(Reduce),
-			NReducer:  c.NReducer,
-			Id:        idx + c.NMapper,
+			OFileNames: c.getInterFileName(idx),
+			TaskPhase:  Phase(Reduce),
+			// NReducer:   c.NReducer,
+			NMapper: c.NMapper,
+			Id:      idx + c.NMapper,
 		}
 		c.TaskQueue.addToTail(&taskMap)
 		c.TaskMeta[idx+c.NMapper] = &MasterTask{
