@@ -56,7 +56,7 @@ func main() {
 			log.Fatalf("cannot open %v", filename)
 		}
 		content, err := io.ReadAll(file)
-		fmt.Printf("类型是：%T\n", content)
+		// fmt.Printf("类型是：%T\n", content)
 		if err != nil {
 			log.Fatalf("cannot read %v", filename)
 		}

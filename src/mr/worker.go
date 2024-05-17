@@ -72,7 +72,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	fmt.Println("worker starts working")
+	// fmt.Println("worker starts working")
 	for {
 		task := queryTask()
 		// fmt.Printf("task.TaskPhase:%v", task.TaskPhase)
@@ -129,6 +129,7 @@ func readFromLocalFile(files []string) *[]KeyValue {
 			kva = append(kva, kv)
 		}
 		file.Close()
+		os.Remove(filename)
 	}
 	return &kva
 }
@@ -137,7 +138,7 @@ func taskComplete(task *Task) {
 	args := Args{Task: *task}
 	reply := Reply{}
 	call("Coordinator.CompleteTask", args, &reply)
-	fmt.Printf("task %v completed\n", task.Id)
+	// fmt.Printf("task %v completed\n", task.Id)
 }
 
 func mapper(task *Task, mapf func(string, string) []KeyValue) {

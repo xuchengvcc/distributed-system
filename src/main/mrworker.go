@@ -16,7 +16,6 @@ import (
 	"os"
 	"plugin"
 	"sync"
-	"time"
 
 	"6.5840/mr"
 )
@@ -28,9 +27,8 @@ func main() {
 	}
 	mapf, reducef := loadPlugin(os.Args[1])
 	numWorkers := 10
-	fmt.Printf("开启 %v 个协程\n", numWorkers)
+	// fmt.Printf("开启 %v 个协程\n", numWorkers)
 	var wg sync.WaitGroup
-	startTime := time.Now()
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
@@ -38,8 +36,6 @@ func main() {
 			mr.Worker(mapf, reducef)
 		}()
 	}
-	spendTime := time.Since(startTime)
-	fmt.Printf("spending time: %v ms\n", spendTime.Milliseconds())
 	wg.Wait()
 	// mr.Worker(mapf, reducef)
 }

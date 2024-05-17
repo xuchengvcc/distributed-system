@@ -123,6 +123,7 @@ func (c *Coordinator) AssignTask(args *Args, reply *Reply) error {
 				c.makeReduceTask()
 				c.Phase = Reduce
 			case Reduce:
+				// fmt.Printf("spending time: %v \n", time.Since(c.TaskMeta[0].Reference.StartTime))
 				c.Phase = Done
 			case Done:
 				reply.Task = Task{
@@ -175,6 +176,7 @@ func (c *Coordinator) checkReduceTask(task *Task) {
 	} else {
 		c.TaskMeta[task.Id].TaskState = Completed
 		if c.checkCompleted() {
+			// fmt.Printf("spending time: %v \n", time.Since(c.TaskMeta[0].Reference.StartTime))
 			c.Phase = Done
 		}
 	}
@@ -239,6 +241,21 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		log.Fatal("获取当前目录失败:", err)
 		return nil
 	}
+
+	pattern := "mr-*"
+	deletFiles, err := filepath.Glob(filepath.Join(dir, pattern))
+	if err != nil {
+		log.Fatal("Error finding files:", err)
+		return nil
+	}
+
+	for _, deletFile := range deletFiles {
+		err := os.Remove(deletFile)
+		if err != nil {
+			log.Fatal("Error deleting file:", deletFile, err)
+		}
+	}
+
 	matches, err := filepath.Glob(filepath.Join(dir, files[0]))
 	if err != nil {
 		log.Fatal("匹配文件失败:", err)
