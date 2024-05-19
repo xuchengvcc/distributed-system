@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"plugin"
 	"sort"
 
@@ -39,18 +38,18 @@ func main() {
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Println("获取当前目录失败:", err)
-		return
-	}
-	matches, err := filepath.Glob(filepath.Join(dir, os.Args[2]))
-	if err != nil {
-		fmt.Println("匹配文件失败:", err)
-		return
-	}
+	// dir, err := os.Getwd()
+	// if err != nil {
+	// 	fmt.Println("获取当前目录失败:", err)
+	// 	return
+	// }
+	// matches, err := filepath.Glob(filepath.Join(dir, os.Args[2]))
+	// if err != nil {
+	// 	fmt.Println("匹配文件失败:", err)
+	// 	return
+	// }
 	intermediate := []mr.KeyValue{}
-	for _, filename := range matches {
+	for _, filename := range os.Args[2:] {
 		file, err := os.Open(filename)
 		if err != nil {
 			log.Fatalf("cannot open %v", filename)
@@ -75,6 +74,7 @@ func main() {
 
 	oname := "mr-out-0"
 	ofile, _ := os.Create(oname)
+	// fmt.Printf("out fileanme: %v", oname)
 
 	//
 	// call Reduce on each distinct key in intermediate[],

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -112,24 +111,13 @@ func (c *Coordinator) AssignTask(args *Args, reply *Reply) error {
 		c.TaskMeta[task.Id].TaskState = Processing
 		task.StartTime = time.Now()
 		reply.Task = *task
+	} else if c.Phase == Done {
+		reply.Task = Task{
+			TaskPhase: Done,
+		}
 	} else {
 		reply.Task = Task{
 			TaskPhase: Wait,
-		}
-		completed := c.checkCompleted()
-		if completed {
-			switch c.Phase {
-			case Map:
-				c.makeReduceTask()
-				c.Phase = Reduce
-			case Reduce:
-				// fmt.Printf("spending time: %v \n", time.Since(c.TaskMeta[0].Reference.StartTime))
-				c.Phase = Done
-			case Done:
-				reply.Task = Task{
-					TaskPhase: Done,
-				}
-			}
 		}
 	}
 	return nil
@@ -138,45 +126,29 @@ func (c *Coordinator) AssignTask(args *Args, reply *Reply) error {
 func (c *Coordinator) CompleteTask(args *Args, reply *Reply) error {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
-	switch args.Task.TaskPhase {
-	case Map:
-		c.checkMapTask(&args.Task)
-	case Reduce:
-		c.checkReduceTask(&args.Task)
+	if args.Task.TaskPhase != c.Phase || c.TaskMeta[args.Task.Id].TaskState == Completed {
+		// 收到不同阶段的结果或是重复结果，丢弃
+		return nil
 	}
+	c.TaskMeta[args.Task.Id].TaskState = Completed
+	c.ProcessTaskComplete(&args.Task)
 	return nil
 }
 
-func (c *Coordinator) checkMapTask(task *Task) {
-	if c.Phase != Map {
-		// 当前任务作废
-
-	} else if time.Since(task.StartTime) > OutTime {
-		task.TaskPhase = Map
-		c.TaskQueue.addToTail(task)
-		c.TaskMeta[task.Id].TaskState = Free
-	} else {
-		c.TaskMeta[task.Id].TaskState = Completed
+func (c *Coordinator) ProcessTaskComplete(task *Task) {
+	// c.Mutex.Lock()
+	// defer c.Mutex.Unlock()
+	// fmt.Println("commit task completed")
+	switch task.TaskPhase {
+	case Map:
 		c.InterFileNames[task.Id] = task.OFileNames
 		if c.checkCompleted() {
-			c.Phase = Reduce
+			// 所有map任务执行完毕
 			c.makeReduceTask()
+			c.Phase = Reduce
 		}
-	}
-}
-
-func (c *Coordinator) checkReduceTask(task *Task) {
-	if c.Phase != Reduce {
-		// 当前任务作废
-
-	} else if time.Since(task.StartTime) > OutTime {
-		task.TaskPhase = Reduce
-		c.TaskQueue.addToTail(task)
-		c.TaskMeta[task.Id].TaskState = Free
-	} else {
-		c.TaskMeta[task.Id].TaskState = Completed
+	case Reduce:
 		if c.checkCompleted() {
-			// fmt.Printf("spending time: %v \n", time.Since(c.TaskMeta[0].Reference.StartTime))
 			c.Phase = Done
 		}
 	}
@@ -231,44 +203,70 @@ func (c *Coordinator) Done() bool {
 	return ret
 }
 
+func (c *Coordinator) catchTimeOut() {
+	for {
+		time.Sleep(4 * time.Second)
+		c.Mutex.Lock()
+		if c.Phase == Done {
+			return
+		}
+		for _, masterTask := range c.TaskMeta {
+			if masterTask.TaskState == Processing && time.Since(masterTask.Reference.StartTime) > OutTime {
+				c.TaskQueue.addToTail(masterTask.Reference)
+				masterTask.TaskState = Free
+			}
+		}
+		c.Mutex.Unlock()
+	}
+}
+
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// files: 文件名
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal("获取当前目录失败:", err)
-		return nil
-	}
+	// dir, err := os.Getwd()
+	// if err != nil {
+	// 	log.Fatal("获取当前目录失败:", err)
+	// 	return nil
+	// }
 
-	pattern := "mr-*"
-	deletFiles, err := filepath.Glob(filepath.Join(dir, pattern))
-	if err != nil {
-		log.Fatal("Error finding files:", err)
-		return nil
-	}
+	// pattern := "mr-*"
+	// deletFiles, err := filepath.Glob(filepath.Join(dir, pattern))
+	// if err != nil {
+	// 	log.Fatal("Error finding files:", err)
+	// 	return nil
+	// }
 
-	for _, deletFile := range deletFiles {
-		err := os.Remove(deletFile)
-		if err != nil {
-			log.Fatal("Error deleting file:", deletFile, err)
-		}
-	}
+	// for _, deletFile := range deletFiles {
+	// 	err := os.Remove(deletFile)
+	// 	if err != nil {
+	// 		log.Fatal("Error deleting file:", deletFile, err)
+	// 	}
+	// }
 
-	matches, err := filepath.Glob(filepath.Join(dir, files[0]))
-	if err != nil {
-		log.Fatal("匹配文件失败:", err)
-		return nil
-	}
+	// matches, err := filepath.Glob(filepath.Join(dir, files[0]))
+	// if err != nil {
+	// 	log.Fatal("匹配文件失败:", err)
+	// 	return nil
+	// }
+	// c := Coordinator{
+	// 	NReducer:       nReduce,
+	// 	NMapper:        len(matches),
+	// 	Files:          matches,
+	// 	Phase:          Map,
+	// 	TaskQueue:      DubTaskList{size: 0},
+	// 	TaskMeta:       make(map[int]*MasterTask),
+	// 	InterFileNames: make([][]string, len(matches)),
+	// }
 	c := Coordinator{
 		NReducer:       nReduce,
-		NMapper:        len(matches),
-		Files:          matches,
+		NMapper:        len(files),
+		Files:          files,
 		Phase:          Map,
 		TaskQueue:      DubTaskList{size: 0},
 		TaskMeta:       make(map[int]*MasterTask),
-		InterFileNames: make([][]string, len(matches)),
+		InterFileNames: make([][]string, len(files)),
 	}
 
 	// Your code here.
@@ -276,7 +274,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.makeMapTask()
 	c.server()
 	// 这里用一个goroutine检查超时任务
-
+	go c.catchTimeOut()
 	return &c
 }
 

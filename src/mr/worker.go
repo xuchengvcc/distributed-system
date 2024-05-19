@@ -97,6 +97,7 @@ func Worker(mapf func(string, string) []KeyValue,
 func writeToFile(taskId int, splitId int, keyValues []KeyValue) (oname string) {
 	dir, _ := os.Getwd()
 	tempFile, err := os.CreateTemp(dir, "mr-temp-*")
+	// fmt.Printf("创建临时文件：%v \n", tempFile)
 	if err != nil {
 		log.Fatal("Failed to create temp file", err)
 	}
@@ -117,6 +118,7 @@ func readFromLocalFile(files []string) *[]KeyValue {
 	kva := []KeyValue{}
 	for _, filename := range files {
 		file, err := os.Open(filename)
+		// fmt.Printf("打开文件：%v \n", filename)
 		if err != nil {
 			log.Fatal("Failed to open file:", filename)
 		}
@@ -129,7 +131,7 @@ func readFromLocalFile(files []string) *[]KeyValue {
 			kva = append(kva, kv)
 		}
 		file.Close()
-		os.Remove(filename)
+		// os.Remove(filename)
 	}
 	return &kva
 }
@@ -137,8 +139,8 @@ func readFromLocalFile(files []string) *[]KeyValue {
 func taskComplete(task *Task) {
 	args := Args{Task: *task}
 	reply := Reply{}
-	call("Coordinator.CompleteTask", args, &reply)
 	// fmt.Printf("task %v completed\n", task.Id)
+	call("Coordinator.CompleteTask", args, &reply)
 }
 
 func mapper(task *Task, mapf func(string, string) []KeyValue) {
@@ -146,7 +148,9 @@ func mapper(task *Task, mapf func(string, string) []KeyValue) {
 	filename := task.FileName
 	content := readFile(filename)
 	intermediates := []KeyValue{}
+	// fmt.Printf("phase: %v, task id = %v starts working\n", task.TaskPhase, task.Id)
 	kva := mapf(filename, string(content))
+	// fmt.Printf("phase: %v, task id = %v still working\n", task.TaskPhase, task.Id)
 	intermediates = append(intermediates, kva...)
 	// 用环形缓冲区先缓存数据
 	buffer := make([][]KeyValue, task.NReducer)
@@ -173,6 +177,7 @@ func reducer(task *Task, reducef func(string, []string) string) {
 	ofile, _ := os.Create(oname)
 	defer ofile.Close()
 	i := 0
+	// fmt.Printf("phase: %v, task id = %v starts working\n", task.TaskPhase, task.Id)
 	for i < len(*kva) {
 		j := i + 1
 		for j < len(*kva) && (*kva)[j].Key == (*kva)[i].Key {
@@ -189,6 +194,7 @@ func reducer(task *Task, reducef func(string, []string) string) {
 
 		i = j
 	}
+	// fmt.Printf("phase: %v, task id = %v still working\n", task.TaskPhase, task.Id)
 	taskComplete(task)
 }
 

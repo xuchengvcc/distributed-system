@@ -15,7 +15,6 @@ import (
 	"log"
 	"os"
 	"plugin"
-	"sync"
 
 	"6.5840/mr"
 )
@@ -26,18 +25,18 @@ func main() {
 		os.Exit(1)
 	}
 	mapf, reducef := loadPlugin(os.Args[1])
-	numWorkers := 10
-	// fmt.Printf("开启 %v 个协程\n", numWorkers)
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			mr.Worker(mapf, reducef)
-		}()
-	}
-	wg.Wait()
-	// mr.Worker(mapf, reducef)
+	// numWorkers := 10
+	// // fmt.Printf("开启 %v 个协程\n", numWorkers)
+	// var wg sync.WaitGroup
+	// for i := 0; i < numWorkers; i++ {
+	// 	wg.Add(1)
+	// 	go func() {
+	// 		defer wg.Done()
+	// 		mr.Worker(mapf, reducef)
+	// 	}()
+	// }
+	// wg.Wait()
+	mr.Worker(mapf, reducef)
 }
 
 // load the application Map and Reduce functions
