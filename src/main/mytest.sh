@@ -68,6 +68,7 @@ rm -f mr-*
 (cd ../../mrapps && go build $RACE -buildmode=plugin early_exit.go) || exit 1
 (cd ../../mrapps && go build $RACE -buildmode=plugin crash.go) || exit 1
 (cd ../../mrapps && go build $RACE -buildmode=plugin nocrash.go) || exit 1
+(cd ../../mrapps && go build $RACE -buildmode=plugin team_vector.go) || exit 1
 (cd .. && go build $RACE mrcoordinator.go) || exit 1
 (cd .. && go build $RACE mrworker.go) || exit 1
 (cd .. && go build $RACE mrsequential.go) || exit 1
@@ -75,58 +76,21 @@ rm -f mr-*
 failed_any=0
 
 #########################################################
-# first word-count
+# now indexer
+rm -f mr-*
 
-# generate the correct output
-../mrsequential ../../mrapps/wc.so ../pg*txt || exit 1
-sort mr-out-0 > mr-correct-wc.txt
-rm -f mr-out*
+echo '***' Starting teamvector test.
 
-#########################################################
-echo '***' Starting crash test.
-
-# generate the correct output
-../mrsequential ../../mrapps/nocrash.so ../pg*txt || exit 1
-sort mr-out-0 > mr-correct-crash.txt
-rm -f mr-out*
-
-rm -f mr-done
-((maybe_quiet $TIMEOUT2 ../mrcoordinator ../pg*txt); touch mr-done ) &
+maybe_quiet $TIMEOUT ../mrcoordinator ../pg*txt &
 sleep 1
 
 # start multiple workers
-maybe_quiet $TIMEOUT2 ../mrworker ../../mrapps/crash.so &
+maybe_quiet $TIMEOUT ../mrworker ../../mrapps/team_vector.so &
+maybe_quiet $TIMEOUT ../mrworker ../../mrapps/team_vector.so &
+maybe_quiet $TIMEOUT ../mrworker ../../mrapps/team_vector.so &
+maybe_quiet $TIMEOUT ../mrworker ../../mrapps/team_vector.so
 
-# mimic rpc.go's coordinatorSock()
-SOCKNAME=/var/tmp/5840-mr-`id -u`
+sort mr-out* | grep . > mr-team_vector-all
 
-( while [ -e $SOCKNAME -a ! -f mr-done ]
-  do
-    maybe_quiet $TIMEOUT2 ../mrworker ../../mrapps/crash.so
-    sleep 1
-  done ) &
+echo '---' team_vector completed
 
-( while [ -e $SOCKNAME -a ! -f mr-done ]
-  do
-    maybe_quiet $TIMEOUT2 ../mrworker ../../mrapps/crash.so
-    sleep 1
-  done ) &
-
-while [ -e $SOCKNAME -a ! -f mr-done ]
-do
-  maybe_quiet $TIMEOUT2 ../mrworker ../../mrapps/crash.so
-  sleep 1
-done
-
-wait
-
-rm $SOCKNAME
-sort mr-out* | grep . > mr-crash-all
-if cmp mr-crash-all mr-correct-crash.txt
-then
-  echo '---' crash test: PASS
-else
-  echo '---' crash output is not the same as mr-correct-crash.txt
-  echo '---' crash test: FAIL
-  failed_any=1
-fi
