@@ -1,13 +1,23 @@
 package kvsrv
 
-import "6.5840/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"math/big"
+	"strconv"
 
+	"6.5840/labrpc"
+)
 
 type Clerk struct {
 	server *labrpc.ClientEnd
 	// You will have to modify this struct.
+}
+
+func (c *Clerk) getUid() string {
+	// t := time.Now()
+	// timestamp := strconv.FormatInt(t.UTC().UnixNano(), 36)
+	timestamp := strconv.FormatInt(nrand(), 10)
+	return timestamp
 }
 
 func nrand() int64 {
@@ -37,7 +47,13 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	return ""
+	args := GetArgs{
+		Key: key,
+	}
+	reply := GetReply{}
+	for !ck.server.Call("KVServer.Get", &args, &reply) {
+	}
+	return reply.Value
 }
 
 // shared by Put and Append.
@@ -50,7 +66,21 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	// You will have to modify this function.
-	return ""
+	// ok := false
+	args := PutAppendArgs{
+		Key:   key,
+		Value: value,
+		Uid:   ck.getUid(),
+	}
+	reply := PutAppendReply{}
+	// for !ok {
+	for !ck.server.Call("KVServer."+op, &args, &reply) {
+	}
+	if op == "Append" {
+		for !ck.server.Call("KVServer.DeletePut", &args, &reply) {
+		}
+	}
+	return reply.Value
 }
 
 func (ck *Clerk) Put(key string, value string) {
