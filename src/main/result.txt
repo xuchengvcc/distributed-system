@@ -1,0 +1,41 @@
+out fileanme: mr-out-0*** Starting wc test.
+unexpected EOF
+unexpected EOF
+unexpected EOF
+--- wc output is not the same as mr-correct-wc.txt
+--- wc test: FAIL
+out fileanme: mr-out-0*** Starting indexer test.
+unexpected EOF
+unexpected EOF
+--- indexer output is not the same as mr-correct-indexer.txt
+--- indexer test: FAIL
+*** Starting map parallelism test.
+unexpected EOF
+unexpected EOF
+--- saw 0 workers rather than 2
+--- map parallelism test: FAIL
+--- map workers did not run in parallel
+--- map parallelism test: FAIL
+*** Starting reduce parallelism test.
+unexpected EOF
+unexpected EOF
+--- too few parallel reduces.
+--- reduce parallelism test: FAIL
+*** Starting job count test.
+unexpected EOF
+unexpected EOF
+--- map jobs ran incorrect number of times ( != 8)
+--- job count test: FAIL
+*** Starting early exit test.
+unexpected EOF
+unexpected EOF
+unexpected EOF
+--- early exit test: PASS
+*** Starting crash test.
+out fileanme: mr-out-0unexpected EOF
+unexpected EOF
+unexpected EOF
+unexpected EOF
+--- crash output is not the same as mr-correct-crash.txt
+--- crash test: FAIL
+*** FAILED SOME TESTS

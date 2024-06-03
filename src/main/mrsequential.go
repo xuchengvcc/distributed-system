@@ -6,6 +6,7 @@ package main
 // go run mrsequential.go wc.so pg*.txt
 //
 
+<<<<<<< HEAD
 import "fmt"
 import "6.5840/mr"
 import "plugin"
@@ -13,6 +14,18 @@ import "os"
 import "log"
 import "io/ioutil"
 import "sort"
+=======
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"plugin"
+	"sort"
+
+	"6.5840/mr"
+)
+>>>>>>> xucheng-240506-lab1
 
 // for sorting by key.
 type ByKey []mr.KeyValue
@@ -35,13 +48,31 @@ func main() {
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
+<<<<<<< HEAD
+=======
+	// dir, err := os.Getwd()
+	// if err != nil {
+	// 	fmt.Println("获取当前目录失败:", err)
+	// 	return
+	// }
+	// matches, err := filepath.Glob(filepath.Join(dir, os.Args[2]))
+	// if err != nil {
+	// 	fmt.Println("匹配文件失败:", err)
+	// 	return
+	// }
+>>>>>>> xucheng-240506-lab1
 	intermediate := []mr.KeyValue{}
 	for _, filename := range os.Args[2:] {
 		file, err := os.Open(filename)
 		if err != nil {
 			log.Fatalf("cannot open %v", filename)
 		}
+<<<<<<< HEAD
 		content, err := ioutil.ReadAll(file)
+=======
+		content, err := io.ReadAll(file)
+		// fmt.Printf("类型是：%T\n", content)
+>>>>>>> xucheng-240506-lab1
 		if err != nil {
 			log.Fatalf("cannot read %v", filename)
 		}
@@ -60,6 +91,10 @@ func main() {
 
 	oname := "mr-out-0"
 	ofile, _ := os.Create(oname)
+<<<<<<< HEAD
+=======
+	// fmt.Printf("out fileanme: %v", oname)
+>>>>>>> xucheng-240506-lab1
 
 	//
 	// call Reduce on each distinct key in intermediate[],

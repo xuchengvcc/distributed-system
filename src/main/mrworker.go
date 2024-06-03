@@ -10,20 +10,46 @@ package main
 // Please do not change this file.
 //
 
+<<<<<<< HEAD
 import "6.5840/mr"
 import "plugin"
 import "os"
 import "fmt"
 import "log"
+=======
+import (
+	"fmt"
+	"log"
+	"os"
+	"plugin"
+
+	"6.5840/mr"
+)
+>>>>>>> xucheng-240506-lab1
 
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr, "Usage: mrworker xxx.so\n")
 		os.Exit(1)
 	}
+<<<<<<< HEAD
 
 	mapf, reducef := loadPlugin(os.Args[1])
 
+=======
+	mapf, reducef := loadPlugin(os.Args[1])
+	// numWorkers := 10
+	// // fmt.Printf("开启 %v 个协程\n", numWorkers)
+	// var wg sync.WaitGroup
+	// for i := 0; i < numWorkers; i++ {
+	// 	wg.Add(1)
+	// 	go func() {
+	// 		defer wg.Done()
+	// 		mr.Worker(mapf, reducef)
+	// 	}()
+	// }
+	// wg.Wait()
+>>>>>>> xucheng-240506-lab1
 	mr.Worker(mapf, reducef)
 }
 

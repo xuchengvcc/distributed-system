@@ -7,6 +7,7 @@ package main
 // go build -buildmode=plugin mtiming.go
 //
 
+<<<<<<< HEAD
 import "6.5840/mr"
 import "strings"
 import "fmt"
@@ -15,13 +16,29 @@ import "syscall"
 import "time"
 import "sort"
 import "io/ioutil"
+=======
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"syscall"
+	"time"
+
+	"6.5840/mr"
+)
+>>>>>>> xucheng-240506-lab1
 
 func nparallel(phase string) int {
 	// create a file so that other workers will see that
 	// we're running at the same time as them.
 	pid := os.Getpid()
 	myfilename := fmt.Sprintf("mr-worker-%s-%d", phase, pid)
+<<<<<<< HEAD
 	err := ioutil.WriteFile(myfilename, []byte("x"), 0666)
+=======
+	err := os.WriteFile(myfilename, []byte("x"), 0666)
+>>>>>>> xucheng-240506-lab1
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +74,10 @@ func nparallel(phase string) int {
 	if err != nil {
 		panic(err)
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> xucheng-240506-lab1
 	return ret
 }
 
