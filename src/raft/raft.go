@@ -213,7 +213,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if args.Term > rf.currentTerm {
+		// 新一轮投票，需要取消上一轮的投票
 		rf.votedFor = -1
+		rf.currentTerm = args.Term // 需要将自己的Term更新，以防止再次开启一轮投票
+		rf.role = Follower
 	}
 
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
