@@ -1,16 +1,5 @@
 package mr
 
-<<<<<<< HEAD
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-
-
-//
-// Map functions return a slice of KeyValue.
-//
-=======
 import (
 	"encoding/json"
 	"fmt"
@@ -33,33 +22,19 @@ func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // Map functions return a slice of KeyValue.
->>>>>>> xucheng-240506-lab1
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-<<<<<<< HEAD
-//
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
-=======
-// use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
->>>>>>> xucheng-240506-lab1
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-<<<<<<< HEAD
-
-//
-// main/mrworker.go calls this function.
-//
-=======
 type WorkerState struct {
 	State bool
 }
@@ -93,24 +68,10 @@ func readFile(filename string) []uint8 {
 }
 
 // main/mrworker.go calls this function.
->>>>>>> xucheng-240506-lab1
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-<<<<<<< HEAD
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
-}
-
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-=======
 	// fmt.Println("worker starts working")
 	for {
 		task := queryTask()
@@ -240,7 +201,6 @@ func reducer(task *Task, reducef func(string, []string) string) {
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
->>>>>>> xucheng-240506-lab1
 func CallExample() {
 
 	// declare an argument structure.
@@ -256,11 +216,7 @@ func CallExample() {
 	// the "Coordinator.Example" tells the
 	// receiving server that we'd like to call
 	// the Example() method of struct Coordinator.
-<<<<<<< HEAD
-	ok := call("Coordinator.Example", &args, &reply)
-=======
 	ok := call("Coordinator.Example", &args, &reply) //改成MyHandler处理函数
->>>>>>> xucheng-240506-lab1
 	if ok {
 		// reply.Y should be 100.
 		fmt.Printf("reply.Y %v\n", reply.Y)
@@ -269,17 +225,9 @@ func CallExample() {
 	}
 }
 
-<<<<<<< HEAD
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
-=======
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
->>>>>>> xucheng-240506-lab1
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
@@ -287,15 +235,9 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
-<<<<<<< HEAD
-	defer c.Close()
-
-	err = c.Call(rpcname, args, reply)
-=======
 	defer c.Close() //在执行完call后关闭rpc连接
 	// fmt.Printf("connect to %v : %v \n", sockname, rpcname)
 	err = c.Call(rpcname, args, reply) // 这里执行了 Coordinator.Example
->>>>>>> xucheng-240506-lab1
 	if err == nil {
 		return true
 	}

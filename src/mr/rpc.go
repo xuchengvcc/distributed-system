@@ -33,10 +33,6 @@ type ExampleReply struct {
 	Y int
 }
 
-<<<<<<< HEAD
-// Add your RPC definitions here.
-
-=======
 type Args struct {
 	Task Task
 }
@@ -52,7 +48,6 @@ type Reply struct {
 // 	*uid++
 // 	return s
 // }
->>>>>>> xucheng-240506-lab1
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
