@@ -218,7 +218,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
 		// if votedFor is null or candidateId
-		if args.Term > rf.currentTerm || (args.LastLogIndex >= len(rf.log)-1 && args.LastLogTerm >= rf.log[len(rf.log)-1].Term) {
+		if args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogIndex >= len(rf.log)-1 && args.LastLogTerm >= rf.log[len(rf.log)-1].Term) {
+			// 需要防止有旧log的candidate选举成功，从而覆盖其他log
 			// and candidate's log is at least as up-to-date as receiver's log, grant vote
 			rf.currentTerm = args.Term
 			reply.Term = rf.currentTerm
