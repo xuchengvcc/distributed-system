@@ -413,7 +413,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (3B).
+	term, isLeader = rf.GetState()
+	if !isLeader {
+		return index, term, isLeader
+	}
 
+	index = rf.commitIndex
 	return index, term, isLeader
 }
 
@@ -498,7 +503,8 @@ func (rf *Raft) StartElection() {
 	rf.votedFor = rf.me
 	rf.voteCount = 1
 	rf.electionTimeout = RandomElectionTimeout()
-	rf.electionTimeStamp = time.Now() // 更新自己的选举时间戳
+	rf.electionTimeStamp = time.Now()  // 更新自己的选举时间戳
+	rf.heartbeatTimeStamp = time.Now() // 以免当前选举还未结束，自己又开启一轮选举
 
 	args := &RequestVoteArgs{
 		Term:         rf.currentTerm,
