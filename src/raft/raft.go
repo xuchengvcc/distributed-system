@@ -46,7 +46,7 @@ func HeartbeatTimeThreshold() int {
 const (
 	Leader int = iota
 	Follower
-	Candidater
+	Candidate
 )
 
 type Entry struct {
@@ -60,8 +60,8 @@ func roleName(idx int) string {
 		return "Leader"
 	case Follower:
 		return "Follower"
-	case Candidater:
-		return "Candidater"
+	case Candidate:
+		return "Candidate"
 	default:
 		return "Unknown"
 	}
@@ -204,7 +204,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	log.Printf("%v(T: %v, V: %v) <<< %v(T: %v)", rf.me, rf.currentTerm, rf.votedFor, args.CandidateId, args.Term)
 	// defer rf.mu.Unlock()
 	if args.Term < rf.currentTerm {
-		// 1. Candidater 的任期小于 Follower 任期
+		// 1. Candidate 的任期小于 Follower 任期
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		log.Printf("%v(T: %v, V: %v)  X  %v(T: %v)\n", rf.me, rf.currentTerm, rf.votedFor, args.CandidateId, args.Term)
@@ -454,7 +454,7 @@ func (rf *Raft) procVoteAnswer(server int, args *RequestVoteArgs) bool {
 	}
 
 	if reply.Term > rf.currentTerm {
-		// Follower 任期大于 Candidater，需要更新自己记录的当前任期、清除投票、改变角色
+		// Follower 任期大于 Candidate，需要更新自己记录的当前任期、清除投票、改变角色
 		rf.currentTerm = reply.Term
 		rf.votedFor = -1
 		rf.role = Follower
@@ -475,8 +475,8 @@ func (rf *Raft) collectVote(server int, args *RequestVoteArgs) {
 		return
 	}
 	rf.voteCount += 1
-	if rf.voteCount > len(rf.peers)/2 && rf.role == Candidater && time.Since(rf.electionTimeStamp) <= time.Duration(rf.electionTimeout)*time.Millisecond {
-		// 第一次超过半票，并且需要检查自己的身份还是否为Candidater，因为期间可能有其他Leader产生
+	if rf.voteCount > len(rf.peers)/2 && rf.role == Candidate && time.Since(rf.electionTimeStamp) <= time.Duration(rf.electionTimeout)*time.Millisecond {
+		// 第一次超过半票，并且需要检查自己的身份还是否为Candidate，因为期间可能有其他Leader产生
 		// 需要成为leader，并发送心跳
 		rf.role = Leader
 		log.Printf("Server_%v becomes new Leader", rf.me)
@@ -494,7 +494,7 @@ func (rf *Raft) StartElection() {
 	rf.mu.Lock()
 	// log.Printf("Follower server_%v start a requestVote\n", rf.me)
 	rf.currentTerm += 1 // 自增Term
-	rf.role = Candidater
+	rf.role = Candidate
 	rf.votedFor = rf.me
 	rf.voteCount = 1
 	rf.electionTimeout = RandomElectionTimeout()
