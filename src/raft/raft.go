@@ -498,7 +498,8 @@ func (rf *Raft) StartElection() {
 	rf.votedFor = rf.me
 	rf.voteCount = 1
 	rf.electionTimeout = RandomElectionTimeout()
-	rf.electionTimeStamp = time.Now() // 更新自己的选举时间戳
+	rf.electionTimeStamp = time.Now()  // 更新自己的选举时间戳
+	rf.heartbeatTimeStamp = time.Now() // 以免当前选举还未结束，自己又开启一轮选举
 
 	args := &RequestVoteArgs{
 		Term:         rf.currentTerm,
