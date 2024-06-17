@@ -18,8 +18,7 @@ package raft
 //
 
 import (
-	//	"bytes"
-
+	"bytes"
 	"log"
 	"math"
 	"math/rand"
@@ -27,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 )
 
@@ -169,9 +168,9 @@ func (rf *Raft) CommitCheck() {
 func (rf *Raft) persist() {
 	// Your code here (3C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.log)
 	// e.Encode(rf.yyy)
 	// raftstate := w.Bytes()
 	// rf.persister.Save(raftstate, nil)
@@ -186,14 +185,18 @@ func (rf *Raft) readPersist(data []byte) {
 	// Example:
 	// r := bytes.NewBuffer(data)
 	// d := labgob.NewDecoder(r)
-	// var xxx
+	// var log
 	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
+	// if d.Decode(&log) != nil ||
+	// 	d.Decode(&yyy) != nil {
+	// 	log.Fatal("Decode(%v) error when readPersist", rf.me)
+	// 	//   error...
 	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
+	// 	rf.mu.Lock()
+	// 	rf.log = log
+	// 	//   rf.xxx = xxx
+	// 	//   rf.yyy = yyy
+	// 	rf.mu.Unlock()
 	// }
 }
 
@@ -283,14 +286,16 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+	XTerm   int  // term in the conflicting entry (if any) -1 if no log at XIndex
+	XIndex  int  // index of first entry with conflicting term (if any)
+	XLen    int  // blank log situations, 即Follower差RPC的进度，Entries中间缺失的长度
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
-	if args.Term < rf.currentTerm || args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if args.Term < rf.currentTerm {
 		// 1. Reply false if term < currentTerm
-		// 2. Reply false log doesn't contain an entry at prevLogIndex whose term mathces prevLogTerm
-		// log.Printf("Illegal%v: L %v(T: %v, PreLogIdx: %v, PreLogTerm: %v) XXX F %v(T: %v, LastLogIdx: %v, LastLogTerm: %v)\n", AppendOrHeartbeat(args.Entries), args.LeaderId, args.Term, args.PrevLogIndex, args.PrevLogTerm, rf.me, rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
+		log.Printf("Illegal%v: L %v(T: %v, PreLogIdx: %v, PreLogTerm: %v) XXX F %v(T: %v, LastLogIdx: %v, LastLogTerm: %v)\n", AppendOrHeartbeat(args.Entries), args.LeaderId, args.Term, args.PrevLogIndex, args.PrevLogTerm, rf.me, rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
 		reply.Term = rf.currentTerm
 		rf.mu.Unlock()
 		reply.Success = false
@@ -300,6 +305,40 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// 重置Follower的心跳时间
 	rf.heartbeatTimeStamp = time.Now()
 
+	if args.Entries == nil {
+		reply.Term = rf.currentTerm
+		if args.LeaderCommit > rf.commitIndex && args.PrevLogIndex == len(rf.log)-1 && args.PrevLogTerm == rf.log[len(rf.log)-1].Term {
+			// 5. LeaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+			// 如果不加会导致 Follower 的 CommitIndex 迟迟不更新
+			log.Printf("F %v update commitIndex", rf.me)
+			rf.commitIndex = (int)(math.Min((float64)(args.LeaderCommit), (float64)(len(rf.log)-1)))
+		}
+		rf.mu.Unlock()
+		reply.Success = true
+		return
+	}
+
+	isConflict := false
+	// 3. An existing entry conflicts with a new one(same index but different term),
+	// delete the existing entry and all that follow it
+	if args.PrevLogIndex >= len(rf.log) {
+		// PrevLogIndex 位置不存在日志项
+		reply.XTerm = -1
+		reply.XLen = len(rf.log) // Log 长度
+		isConflict = true
+		log.Printf("F %v(T: %v,LastLog: %v) doesn't contain L %v(T: %v,FirLog: %v)", rf.me, rf.currentTerm, len(rf.log)-1, args.LeaderId, args.Term, args.PrevLogIndex+1)
+	} else if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		// PrevLogIndex 位置的日志项存在，但term不匹配
+		reply.XTerm = rf.log[args.PrevLogIndex].Term
+		i := args.PrevLogIndex
+		for rf.log[i].Term == reply.XTerm {
+			i -= 1
+		}
+		reply.XIndex = i + 1
+		isConflict = true
+		log.Printf("F %v(T: %v,ConfI: %v,LastI: %v) Conflict L %v(T: %v,RreI: %v)", rf.me, rf.currentTerm, reply.XIndex, len(rf.log)-1, args.LeaderId, args.Term, args.PrevLogIndex)
+	}
+
 	if args.Term > rf.currentTerm {
 		// 新Leader的消息
 		// log.Printf("New Leader: %v(T: %v) Follower: %v(T: %v)\n", args.LeaderId, args.Term, rf.me, rf.currentTerm)
@@ -308,35 +347,26 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.role = Follower         // 心跳抑制投票
 	}
 
-	if args.Entries == nil {
-		// 心跳
-		// log.Printf("Heartbeat: F %v(T: %v) <<< L %v(T: %v)\n", rf.me, rf.currentTerm, args.LeaderId, args.Term)
+	if isConflict {
+		// 2. Reply false log doesn't contain an entry at prevLogIndex whose term mathces prevLogTerm
 		reply.Term = rf.currentTerm
-		if args.LeaderCommit > rf.commitIndex {
-			// 5. LeaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
-			// 如果不加会导致 Follower 的 CommitIndex 迟迟不更新
-			rf.commitIndex = (int)(math.Min((float64)(args.LeaderCommit), (float64)(len(rf.log)-1)))
-		}
 		rf.mu.Unlock()
-		reply.Success = true
+		reply.Success = false
 		return
-	} else {
-		log.Printf("AppendEntries: F %v(T: %v,I: %v) <<< L %v(T: %v,I: %v)\n", rf.me, rf.currentTerm, len(rf.log)-1, args.LeaderId, args.Term, args.PrevLogIndex+1)
-		if len(rf.log)-1 > args.PrevLogIndex && rf.log[args.PrevLogIndex+1].Term != args.Entries[0].Term {
-			// 3. An existing entry conflicts with a new one(same index but different term), delete the existing entry and all that follow it
-			// log.Printf("Log conflict: L %v(PreLogIdx: %v, PreLogTerm: %v) CCC F %v(LastLogIdx: %v, LastLogTerm: %v)", args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, rf.me, len(rf.log)-1, rf.log[len(rf.log)-1].Term)
-			rf.log = rf.log[:args.PrevLogIndex+1]
-		}
 	}
+
 	// 4. Append any new entries not already in the log
 	// preLastLog := len(rf.log) - 1
-	rf.log = append(rf.log, args.Entries...)
+	// rf.log = append(rf.log, args.Entries...)
+	log.Printf("Append F %v(LastLog: %v) <<< L %v(T: %v,I: %v)", rf.me, len(rf.log)-1, args.LeaderId, args.Term, args.PrevLogIndex+1)
 	// log.Printf("Append F %v from last %v to %v", rf.me, preLastLog, len(rf.log)-1)
+	rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
 	reply.Success = true
 	reply.Term = rf.currentTerm
 
-	if args.LeaderCommit > rf.commitIndex {
+	if args.LeaderCommit > rf.commitIndex && args.PrevLogIndex == len(rf.log)-1 && args.PrevLogTerm == rf.log[len(rf.log)-1].Term {
 		// 5. LeaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+		log.Printf("F %v update commitIndex", rf.me)
 		rf.commitIndex = (int)(math.Min((float64)(args.LeaderCommit), (float64)(len(rf.log)-1)))
 	}
 	rf.mu.Unlock()
@@ -395,7 +425,7 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 
 	if reply.Term > rf.currentTerm {
 		// Follower 的Term超过了自己，说明自己已经不是Leader了
-		// log.Printf("Old Leader %v(T: %v) Received Reply(T: %v), Convert to Follower", rf.me, rf.currentTerm, reply.Term)
+		log.Printf("Old Leader %v(T: %v,Commit: %v) Received Reply(T: %v), Convert to Follower", rf.me, rf.currentTerm, rf.commitIndex, reply.Term)
 		rf.currentTerm = reply.Term
 		rf.votedFor = -1
 		rf.role = Follower
@@ -404,13 +434,32 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 	rf.mu.Unlock()
 	for !reply.Success {
 		// 快速重试机制
+		// TODO: 找到冲突的log的Term，将从个Term开始到最后的所有Entry重新发送，以减少RPC重试
 		rf.mu.Lock()
 		if reply.Term == rf.currentTerm && rf.role == Leader {
 			// 复制log失败，但Term相同，且自己仍为Leader，说明Follower日志在prevLogIndex位置没有与prevLogTerm匹配的项
 			// 将nextIndex自减再重试
+			// 尝试快速回退
 			log.Printf("Quick retry L %v(T: %v,PreLogIdx: %v) >>> F %v", rf.me, rf.currentTerm, args.PrevLogIndex, server)
-			rf.nextIndex[server]--
-
+			if reply.XTerm == -1 {
+				// PrevLogIndex 这个位置在 Follower 不存在
+				log.Printf("F %v() lack log, PreLogIdx back to %v", server, reply.XLen)
+				rf.nextIndex[server] = reply.XLen
+			} else {
+				i := rf.nextIndex[server] - 1
+				for i > 0 && rf.log[i].Term > reply.XTerm {
+					i--
+				}
+				if rf.log[i].Term == reply.XTerm {
+					// PrevLogIndex 发生冲突的位置，Follower 的 Term Leader也有
+					log.Printf("F %v Conflict L %v(ConfT: %v) SameTerm", server, rf.me, reply.XTerm)
+					rf.nextIndex[server] = i + 1
+				} else {
+					// PrevLogIndex 发生冲突的位置，Leader 没有该 Follower 的冲突Term
+					log.Printf("F %v Conflict L %v(ConfI: %v) NoTerm", server, rf.me, reply.XIndex)
+					rf.nextIndex[server] = reply.XIndex
+				}
+			}
 			args.Entries = rf.log[rf.nextIndex[server]:]
 			args.PrevLogIndex = rf.nextIndex[server] - 1
 			args.PrevLogTerm = rf.log[rf.nextIndex[server]-1].Term
@@ -608,7 +657,7 @@ func (rf *Raft) collectVote(server int, args *RequestVoteArgs) {
 			// 匹配下标重置为0
 			rf.matchIndex[i] = 0
 		}
-		// log.Printf("Server_%v becomes new Leader", rf.me)
+		log.Printf("Server_%v becomes new Leader", rf.me)
 		rf.mu.Unlock()
 		// 发送心跳消息或复制消息
 		go rf.StartSendAppendEntries()
