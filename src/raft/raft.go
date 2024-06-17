@@ -61,15 +61,9 @@ func roleName(idx int) string {
 	case Leader:
 		return "L"
 	case Follower:
-<<<<<<< HEAD
-		return "Follower"
-	case Candidate:
-		return "Candidate"
-=======
 		return "F"
 	case Candidate:
 		return "C"
->>>>>>> xucheng-240615-Raft-lab3-B
 	default:
 		return "Unknown"
 	}
