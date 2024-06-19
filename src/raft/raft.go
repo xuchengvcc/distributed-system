@@ -515,6 +515,7 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 				return
 			}
 			rf.mu.Unlock()
+			// 此处需要解锁，否则可能导致死锁
 			ok2 := rf.sendAppendEntries(server, args, reply)
 			if reply.Success {
 				rf.mu.Lock()
