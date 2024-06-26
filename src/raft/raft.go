@@ -30,7 +30,8 @@ import (
 	"6.5840/labrpc"
 )
 
-const HeartbeatTime = 30
+const ImmidiateTime = 5
+const HeartbeatTime = 80
 const ElectionTimeoutRangeBottom = 150
 const ElectionTimeoutRangeTop = 300
 const CheckTimeInter = 20
@@ -75,6 +76,10 @@ func AppendOrHeartbeat(entries []Entry) string {
 	} else {
 		return "AppendEntries"
 	}
+}
+
+func (rf *Raft) ResetHeartTimer(timeGap int) {
+	rf.HeartbeatTimer.Reset(time.Duration(timeGap) * time.Millisecond)
 }
 
 // 调用转换时需要加锁
@@ -144,11 +149,12 @@ type Raft struct {
 	nextIndex  []int // 用全局索引
 	matchIndex []int // 用全局索引
 
-	heartbeatTimeStamp time.Time
-	electionTimeStamp  time.Time // 选举开始时间戳
-	electionTimeout    int
-	role               int
-	voteCount          int
+	// heartbeatTimeStamp time.Time
+	HeartbeatTimer    *time.Timer // RPC不能过多，且提交速度要快，因此不采用固定周期心跳
+	electionTimeStamp time.Time   // 选举开始时间戳
+	electionTimeout   int
+	role              int
+	voteCount         int
 
 	// 3D SnapShot
 	snapShot          []byte // 快照
@@ -390,7 +396,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.Term = rf.currentTerm
 			rf.persist()
 			rf.role = Follower
-			rf.heartbeatTimeStamp = time.Now()
+			// rf.heartbeatTimeStamp = time.Now()
+			rf.ResetHeartTimer(HeartbeatTimeThreshold())
 
 			reply.VoteGranted = true
 			// rf.mu.Unlock()
@@ -435,7 +442,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// 重置Follower的心跳时间
-	rf.heartbeatTimeStamp = time.Now()
+	// rf.heartbeatTimeStamp = time.Now()
+	rf.ResetHeartTimer(HeartbeatTimeThreshold())
 
 	if args.Term > rf.currentTerm {
 		// 新Leader的消息
@@ -584,7 +592,8 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 		rf.votedFor = -1
 		rf.persist()
 		rf.role = Follower
-		rf.heartbeatTimeStamp = time.Now()
+		// rf.heartbeatTimeStamp = time.Now()
+		rf.ResetHeartTimer(HeartbeatTimeThreshold())
 	}
 
 	rf.mu.Unlock()
@@ -664,7 +673,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.mu.Lock()
 	// log.Printf("Snapshot %v %v(LastLogI: %v) <<< L %v(LastIncludedIdx: %v)", roleName(rf.role), rf.me, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.LastIncludedIndex)
 	defer func() {
-		rf.heartbeatTimeStamp = time.Now()
+		// rf.heartbeatTimeStamp = time.Now()
+		rf.ResetHeartTimer(HeartbeatTimeThreshold())
 		// log.Printf("Snapshot %v %v(LastLogI: %v) <<< L %v(LastIncludedIdx: %v) End Reset HeartbeatTime", roleName(rf.role), rf.me, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.LastIncludedIndex)
 		rf.mu.Unlock()
 	}()
@@ -751,7 +761,8 @@ func (rf *Raft) sendInstallSnapshotToServer(server int) {
 		rf.currentTerm = reply.Term
 		rf.role = Follower
 		rf.votedFor = -1
-		rf.heartbeatTimeStamp = time.Now()
+		// rf.heartbeatTimeStamp = time.Now()
+		rf.ResetHeartTimer(HeartbeatTimeThreshold())
 		rf.persist()
 		return
 	}
@@ -885,6 +896,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.log = append(rf.log, newEntry)
+	rf.ResetHeartTimer(ImmidiateTime)
 	rf.persist()
 	// log.Printf("Get %v(Leader: true) Command %v in Start after Lock, return %v, %v, %v", rf.me, command, len(rf.log)-1, rf.currentTerm, true)
 	return rf.LocalToGlobal(len(rf.log) - 1), rf.currentTerm, true
@@ -997,8 +1009,9 @@ func (rf *Raft) StartElection() {
 	// log.Printf("%v %v(T: %v) start RequestVote\n", roleName(rf.role), rf.me, rf.currentTerm)
 	rf.voteCount = 1
 	rf.electionTimeout = RandomElectionTimeout()
-	rf.electionTimeStamp = time.Now()  // 更新自己的选举时间戳
-	rf.heartbeatTimeStamp = time.Now() // 以免当前选举还未结束，自己又开启一轮选举
+	rf.electionTimeStamp = time.Now() // 更新自己的选举时间戳
+	// rf.heartbeatTimeStamp = time.Now() // 以免当前选举还未结束，自己又开启一轮选举
+	rf.ResetHeartTimer(HeartbeatTimeThreshold()) // 以免当前选举还未结束，自己又开启一轮选举
 
 	args := &RequestVoteArgs{
 		Term:         rf.currentTerm,
@@ -1022,9 +1035,11 @@ func (rf *Raft) ticker() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
 		// log.Printf("%v server_%v checking itself\n", roleName(rf.role), rf.me)
+		<-rf.HeartbeatTimer.C
 		rf.mu.Lock()
-		sincePrevHeartbeat := time.Since(rf.heartbeatTimeStamp)
-		if rf.role != Leader && sincePrevHeartbeat > time.Duration(HeartbeatTimeThreshold())*time.Millisecond {
+		// sincePrevHeartbeat := time.Since(rf.heartbeatTimeStamp)
+		// if rf.role != Leader && sincePrevHeartbeat > time.Duration(HeartbeatTimeThreshold())*time.Millisecond {
+		if rf.role != Leader {
 			// TODO: 发起选举
 			// log.Printf("%v %v should start a requestVote HeartbeatTimeout %v\n", roleName(rf.role), rf.me, sincePrevHeartbeat)
 			go rf.StartElection()
@@ -1036,8 +1051,8 @@ func (rf *Raft) ticker() {
 		rf.mu.Unlock()
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		// ms := 50 + (rand.Int63() % 300)
+		// time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
 
@@ -1059,17 +1074,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		applyCh:   applyCh,
 		dead:      0,
 
-		log:                make([]Entry, 0),
-		currentTerm:        0,
-		votedFor:           -1,
-		nextIndex:          make([]int, len(peers)),
-		matchIndex:         make([]int, len(peers)),
-		commitIndex:        0,
-		lastApplied:        0,
-		role:               Follower,
-		heartbeatTimeStamp: time.Now(),
-		electionTimeStamp:  time.Now(),
-		voteCount:          0,
+		log:         make([]Entry, 0),
+		currentTerm: 0,
+		votedFor:    -1,
+		nextIndex:   make([]int, len(peers)),
+		matchIndex:  make([]int, len(peers)),
+		commitIndex: 0,
+		lastApplied: 0,
+		role:        Follower,
+		// heartbeatTimeStamp: time.Now(),
+		HeartbeatTimer:    time.NewTimer(0),
+		electionTimeStamp: time.Now(),
+		voteCount:         0,
 	}
 	rf.log = append(rf.log, Entry{Term: 0})
 	// rf.peers = peers
