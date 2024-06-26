@@ -1,13 +1,37 @@
 package kvraft
 
-import "6.5840/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"math/big"
+	"sync"
+	"time"
 
+	"6.5840/labrpc"
+)
+
+var id = 100
+var mu sync.Mutex
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	leader  int
+	incrId  uint64
+	clerkId int
+}
+
+func (c *Clerk) getUid() uint64 {
+	t := time.Now()
+	timestamp := uint64(t.UTC().UnixNano())
+	// timestamp := strconv.FormatInt(nrand(), 10)
+	return timestamp
+}
+
+func (c *Clerk) getClerkId() int {
+	mu.Lock()
+	defer mu.Unlock()
+	id++
+	return id
 }
 
 func nrand() int64 {
@@ -21,6 +45,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.leader = 0
+	ck.incrId = ck.getUid()
+	ck.clerkId = ck.getClerkId()
 	return ck
 }
 
@@ -37,7 +64,25 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	return ""
+	args := GetArgs{
+		Key:     key,
+		IncrId:  ck.getUid(),
+		ClerkId: ck.clerkId,
+	}
+	for {
+		reply := GetReply{}
+		// log.Printf("Clerk %v Send Get Request(Key: %v) to %v", ck.clerkId, key, ck.leader)
+		ok := ck.servers[ck.leader].Call("KVServer.Get", &args, &reply)
+		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrHandleTimeout {
+			ck.leader = (ck.leader + 1) % len(ck.servers)
+			continue
+		}
+		// switch reply.Err {
+		// 	case
+		// }
+		return reply.Value
+	}
+	// return reply.Value
 }
 
 // shared by Put and Append.
@@ -50,6 +95,26 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	args := PutAppendArgs{
+		Key:     key,
+		Value:   value,
+		IncrId:  ck.getUid(),
+		ClerkId: ck.clerkId,
+	}
+	for {
+		reply := PutAppendReply{}
+		ok := ck.servers[ck.leader].Call("KVServer."+op, &args, &reply)
+		// log.Printf("Clerk %v Send %v to %v Request(Key: %v,Value: %v), Err: %v", ck.clerkId, op, ck.leader, key, value, reply.Err)
+		if !ok || reply.Err == ErrNoKey || reply.Err == ErrWrongLeader || reply.Err == ErrHandleTimeout {
+			ck.leader = (ck.leader + 1) % len(ck.servers)
+			continue
+		}
+		// switch {
+
+		// }
+		return
+	}
+
 }
 
 func (ck *Clerk) Put(key string, value string) {

@@ -1,15 +1,25 @@
 package kvraft
 
 import (
-	"6.5840/labgob"
-	"6.5840/labrpc"
-	"6.5840/raft"
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"6.5840/labgob"
+	"6.5840/labrpc"
+	"6.5840/raft"
 )
 
 const Debug = false
+const HandleTimeout = time.Duration(1000) * time.Millisecond
+const MaxMapLen = 1000
+
+const (
+	GET int = iota
+	PUT
+	APPEND
+)
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -18,11 +28,22 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+type result struct {
+	LastId  uint64
+	Err     Err
+	Value   string
+	ResTerm int // commit时的Term
+}
 
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Optype  int
+	IncrId  uint64 // 全局递增的Id，用于区分请求的新旧
+	ClerkId int    // 客户端 Id，与全局递增 Id 拼接以标识唯一消息
+	Key     string
+	Value   string
 }
 
 type KVServer struct {
@@ -32,22 +53,208 @@ type KVServer struct {
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 
-	maxraftstate int // snapshot if log grows this big
+	waitCh  map[int]*chan result // 接收Raft提交条目的通道
+	history map[int]result       // 存储此前的历史结果
 
+	maxraftstate int // snapshot if log grows this big
+	maxMapLen    int
+	db           map[string]string
 	// Your definitions here.
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	_, isLeader := kv.rf.GetState()
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	opArgs := &Op{
+		Optype:  GET,
+		IncrId:  args.IncrId,
+		ClerkId: args.ClerkId,
+		Key:     args.Key,
+	}
+	res := kv.HandleOp(opArgs)
+	reply.Err = res.Err
+	reply.Value = res.Value
+	log.Printf("%v Get Get Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, res.Value)
 }
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	_, isLeader := kv.rf.GetState()
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	opArgs := &Op{
+		Optype:  PUT,
+		IncrId:  args.IncrId,
+		ClerkId: args.ClerkId,
+		Key:     args.Key,
+		Value:   args.Value,
+	}
+	res := kv.HandleOp(opArgs)
+	log.Printf("%v Put Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, args.Value)
+	reply.Err = res.Err
 }
 
 func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	_, isLeader := kv.rf.GetState()
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	opArgs := &Op{
+		Optype:  APPEND,
+		IncrId:  args.IncrId,
+		ClerkId: args.ClerkId,
+		Key:     args.Key,
+		Value:   args.Value,
+	}
+	res := kv.HandleOp(opArgs)
+	log.Printf("%v Append Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, args.Value)
+	reply.Err = res.Err
+}
+
+func (kv *KVServer) HandleOp(opArgs *Op) result {
+	sIdx, sTerm, isLeader := kv.rf.Start(*opArgs)
+	if !isLeader {
+		return result{Err: ErrWrongLeader}
+	}
+
+	kv.mu.Lock()
+	newCh := make(chan result)
+	kv.waitCh[sIdx] = &newCh
+	// log.Printf("L %v Clerk %v IncrId %v create new Channel %p", kv.me, opArgs.ClerkId, opArgs.IncrId, &newCh)
+	kv.mu.Unlock()
+
+	defer func() {
+		kv.mu.Lock()
+		delete(kv.waitCh, sIdx)
+		close(newCh)
+		kv.mu.Unlock()
+	}()
+
+	select {
+	case <-time.After(HandleTimeout):
+		log.Printf("L %v Clerk %v IncrId %v Timeout", kv.me, opArgs.ClerkId, opArgs.IncrId)
+		return result{Err: ErrHandleTimeout}
+	case msg, success := <-newCh:
+		if success && msg.ResTerm == sTerm {
+			// log.Printf("%v HandleOp Successful, ResTerm %v, Value: %v, Err: %v, LastId: %v", kv.me, msg.ResTerm, msg.Value, msg.Err, msg.LastId)
+			return msg
+		} else if !success {
+			// 通道关闭
+			log.Printf("L %v Clerk %v IncrId %v Channel Close", kv.me, opArgs.ClerkId, opArgs.IncrId)
+			return result{Err: ErrChanClosed}
+		} else {
+			// 任期变更
+			log.Printf("L %v Clerk %v IncrId %v Leader Changed", kv.me, opArgs.ClerkId, opArgs.IncrId)
+			return result{Err: ErrLeaderChanged}
+		}
+	}
+
+}
+
+func (kv *KVServer) ApplyHandler() {
+	for !kv.killed() {
+		// 循环将从节点提交的条目应用到状态机
+		_log := <-kv.applyCh
+		if _log.CommandValid {
+			op, ok := _log.Command.(Op)
+			if !ok {
+				log.Printf("L %v: Raft Log Convert Failed, Type Incompact", kv.me)
+			}
+			// else {
+			// 	log.Printf("L %v: Get the Command Successful", kv.me)
+			// }
+			kv.mu.Lock()
+			// 首先判断此 log 是否需要被应用
+			var res result
+			need := false
+			if clerkMap, exist := kv.history[op.ClerkId]; exist {
+				if clerkMap.LastId == op.IncrId {
+					// 用历史记录
+					res = clerkMap
+				} else if clerkMap.LastId < op.IncrId {
+					need = true
+				}
+			} else {
+				need = true
+			}
+			_, isLeader := kv.rf.GetState()
+			if need {
+				// TODO: 执行log
+				// log.Printf("%v DBExecute, IsLeader: %v", kv.me, isLeader)
+				res = kv.DBExecute(&op, isLeader)
+				res.ResTerm = _log.SnapshotTerm
+				kv.history[op.ClerkId] = res
+			}
+			if !isLeader {
+				// 如果不是Leader，检查下个log
+				kv.mu.Unlock()
+				continue
+			}
+			// Leader 需要额外通知handler处理clerk回复
+			ch, exist := kv.waitCh[_log.CommandIndex]
+			if !exist {
+				log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
+				kv.mu.Unlock()
+				continue
+			}
+			kv.mu.Unlock()
+			// 发送消息
+			func() {
+				defer func() {
+					if recover() != nil {
+						log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
+					}
+				}()
+				res.ResTerm = _log.SnapshotTerm
+				*ch <- res
+			}()
+
+		}
+	}
+}
+
+func (kv *KVServer) DBExecute(op *Op, isLeader bool) (res result) {
+	// 需在加锁状态下调用
+	// log.Printf("%v Get in DBExecute, IsLeader: %v, IncrId: %v, optype: %v", kv.me, isLeader, op.IncrId, op.Optype)
+	res.LastId = op.IncrId
+	switch op.Optype {
+	case GET:
+		val, exist := kv.db[op.Key]
+		if exist {
+			res.Value = val
+			// TODO: 记录请求成功
+			return
+		} else {
+			res.Err = ErrNoKey
+			res.Value = ""
+			// TODO: 记录请求失败
+			return
+		}
+	case PUT:
+		kv.db[op.Key] = op.Value
+		// TODO：记录
+		return
+	case APPEND:
+		val, exist := kv.db[op.Key]
+		if exist {
+			kv.db[op.Key] = val + op.Value
+			// TODO：记录
+			return
+		} else {
+			kv.db[op.Key] = op.Value
+			// TODO：记录
+			return
+		}
+	}
+	return
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -96,6 +303,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	kv.dead = 0
+	kv.history = make(map[int]result)
+	kv.waitCh = map[int]*chan result{}
+	kv.maxMapLen = MaxMapLen
+	kv.db = map[string]string{}
+
+	go kv.ApplyHandler()
 
 	return kv
 }

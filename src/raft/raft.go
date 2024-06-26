@@ -30,7 +30,7 @@ import (
 	"6.5840/labrpc"
 )
 
-const HeartbeatTime = 80
+const HeartbeatTime = 30
 const ElectionTimeoutRangeBottom = 150
 const ElectionTimeoutRangeTop = 300
 const CheckTimeInter = 20
@@ -185,12 +185,20 @@ func (rf *Raft) CommitCheck() {
 				Command:      rf.log[rf.GlobalToLocal(tmpApplied)].Command,
 				CommandIndex: tmpApplied,
 				SnapshotTerm: rf.log[rf.GlobalToLocal(tmpApplied)].Term,
+				// Command:      rf.log[rf.GlobalToLocal(rf.lastApplied)].Command,
+				// CommandIndex: rf.lastApplied,
+				// SnapshotTerm: rf.log[rf.GlobalToLocal(rf.lastApplied)].Term,
 			}
 			buffer = append(buffer, message)
+			// rf.mu.Unlock()
 			// rf.applyCh <- message
 			// log.Printf("%v %v add Command %v(Idx: %v) to Buffer", roleName(rf.role), rf.me, message.Command, message.CommandIndex)
+			// rf.mu.Lock()
 		}
 		rf.mu.Unlock()
+		// if len(buffer) > 0 {
+		// 	log.Printf("%v %v will send Command", roleName(rf.role), rf.me)
+		// }
 
 		// 解锁后，可能出现 SnapShot，协程修改 rf.lastApplied
 		for _, msg := range buffer {
@@ -959,7 +967,7 @@ func (rf *Raft) collectVote(server int, args *RequestVoteArgs) {
 			rf.nextIndex[i] = rf.LocalToGlobal(len(rf.log))
 			rf.matchIndex[i] = rf.lastIncludedIndex
 		}
-		// log.Printf("C %v(T: %v,LastLogI: %v,LastLogT: %v,LastLog: %v,CommitI: %v) becomes new Leader", rf.me, rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term, rf.log[len(rf.log)-1].Command, rf.commitIndex)
+		log.Printf("C %v(T: %v,LastLogI: %v,LastLogT: %v,LastLog: %v,CommitI: %v) becomes new Leader", rf.me, rf.currentTerm, len(rf.log)-1, rf.log[len(rf.log)-1].Term, rf.log[len(rf.log)-1].Command, rf.commitIndex)
 		// rf.mu.Unlock()
 		// 发送心跳消息或复制消息
 		go rf.StartSendAppendEntries()
