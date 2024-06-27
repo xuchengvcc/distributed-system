@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"bytes"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -11,9 +12,10 @@ import (
 	"6.5840/raft"
 )
 
+const RaftStateNumThreshold = 90
 const Debug = false
 const HandleTimeout = time.Duration(1000) * time.Millisecond
-const MaxMapLen = 1000
+const MaxMapLen = 10000
 
 const (
 	GET int = iota
@@ -59,6 +61,8 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 	maxMapLen    int
 	db           map[string]string
+	lastApplied  int // apply的最后一个下标
+	persister    *raft.Persister
 	// Your definitions here.
 }
 
@@ -78,7 +82,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
 	reply.Value = res.Value
-	log.Printf("%v Get Get Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, res.Value)
+	log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
 }
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
@@ -96,7 +100,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Put Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, args.Value)
+	log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -115,14 +119,20 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Append Result(Err: %v, Key: %v, Value: %v)", kv.me, res.Err, args.Key, args.Value)
+	log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
 func (kv *KVServer) HandleOp(opArgs *Op) result {
+	kv.mu.Lock()
+	if history, exist := kv.history[opArgs.ClerkId]; exist && history.LastId == opArgs.IncrId {
+		kv.mu.Unlock()
+		return history
+	}
+	kv.mu.Unlock()
 	sIdx, sTerm, isLeader := kv.rf.Start(*opArgs)
 	if !isLeader {
-		return result{Err: ErrWrongLeader}
+		return result{Err: ErrWrongLeader, Value: ""}
 	}
 
 	kv.mu.Lock()
@@ -153,7 +163,7 @@ func (kv *KVServer) HandleOp(opArgs *Op) result {
 		} else {
 			// 任期变更
 			log.Printf("L %v Clerk %v IncrId %v Leader Changed", kv.me, opArgs.ClerkId, opArgs.IncrId)
-			return result{Err: ErrLeaderChanged}
+			return result{Err: ErrLeaderChanged, Value: ""}
 		}
 	}
 
@@ -172,6 +182,11 @@ func (kv *KVServer) ApplyHandler() {
 			// 	log.Printf("L %v: Get the Command Successful", kv.me)
 			// }
 			kv.mu.Lock()
+			if _log.CommandIndex <= kv.lastApplied {
+				kv.mu.Unlock()
+				continue
+			}
+			kv.lastApplied = _log.CommandIndex
 			// 首先判断此 log 是否需要被应用
 			var res result
 			need := false
@@ -185,43 +200,85 @@ func (kv *KVServer) ApplyHandler() {
 			} else {
 				need = true
 			}
-			_, isLeader := kv.rf.GetState()
+			// _, isLeader := kv.rf.GetState()
 			if need {
-				// TODO: 执行log
 				// log.Printf("%v DBExecute, IsLeader: %v", kv.me, isLeader)
-				res = kv.DBExecute(&op, isLeader)
+				res = kv.DBExecute(&op)
 				res.ResTerm = _log.SnapshotTerm
-				kv.history[op.ClerkId] = res
+				kv.history[op.ClerkId] = res // 更新历史
 			}
-			if !isLeader {
-				// 如果不是Leader，检查下个log
-				kv.mu.Unlock()
-				continue
-			}
+			// if !isLeader {
+			// 	// 如果不是Leader，检查下个log
+			// 	kv.mu.Unlock()
+			// 	continue
+			// }
 			// Leader 需要额外通知handler处理clerk回复
 			ch, exist := kv.waitCh[_log.CommandIndex]
-			if !exist {
-				log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
+			if exist {
 				kv.mu.Unlock()
-				continue
+				func() {
+					defer func() {
+						if recover() != nil {
+							log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
+						}
+					}()
+					res.ResTerm = _log.SnapshotTerm
+					*ch <- res
+				}()
+				kv.mu.Lock()
 			}
+			if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate*RaftStateNumThreshold/100 {
+				//  TODO 生成快照
+				log.Printf("RaftStateSize: %v", kv.persister.RaftStateSize())
+				snapshot := kv.Snapshot()
+				kv.rf.Snapshot(_log.CommandIndex, snapshot)
+			}
+
 			kv.mu.Unlock()
 			// 发送消息
-			func() {
-				defer func() {
-					if recover() != nil {
-						log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
-					}
-				}()
-				res.ResTerm = _log.SnapshotTerm
-				*ch <- res
-			}()
 
+		} else if _log.SnapshotValid {
+			kv.mu.Lock()
+			if _log.SnapshotIndex >= kv.lastApplied {
+				kv.LoadSnapshot(_log.Snapshot)
+				kv.lastApplied = _log.SnapshotIndex
+			}
+			kv.mu.Unlock()
 		}
 	}
 }
 
-func (kv *KVServer) DBExecute(op *Op, isLeader bool) (res result) {
+func (kv *KVServer) Snapshot() []byte {
+	buffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buffer)
+
+	encoder.Encode(kv.db)
+	encoder.Encode(kv.history)
+
+	return buffer.Bytes()
+}
+
+func (kv *KVServer) LoadSnapshot(snapshot []byte) {
+	if snapshot == nil || len(snapshot) < 1 {
+		log.Printf("%v Snapshot is Empty", kv.me)
+		return
+	}
+
+	buffer := bytes.NewBuffer(snapshot)
+	decoder := labgob.NewDecoder(buffer)
+
+	db := make(map[string]string)
+	historyDb := make(map[int]result)
+	if decoder.Decode(&db) != nil || decoder.Decode(&historyDb) != nil {
+		log.Printf("%v Decode Snapshot Failed", kv.me)
+	} else {
+		kv.db = db
+		kv.history = historyDb
+		log.Printf("%v Decode Snapshot Successfully", kv.me)
+	}
+}
+
+func (kv *KVServer) DBExecute(op *Op) (res result) {
 	// 需在加锁状态下调用
 	// log.Printf("%v Get in DBExecute, IsLeader: %v, IncrId: %v, optype: %v", kv.me, isLeader, op.IncrId, op.Optype)
 	res.LastId = op.IncrId
@@ -296,6 +353,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.lastApplied = 0
+	kv.persister = persister
 
 	// You may need initialization code here.
 
@@ -308,6 +367,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.waitCh = map[int]*chan result{}
 	kv.maxMapLen = MaxMapLen
 	kv.db = map[string]string{}
+	kv.mu.Lock()
+	kv.LoadSnapshot(persister.ReadSnapshot())
+	kv.mu.Unlock()
 
 	go kv.ApplyHandler()
 
