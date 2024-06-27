@@ -329,14 +329,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// log.Printf("%v %v(ComitIdx: %v,LastIncludIdx: %v) Receive Snapshot, Idx %v, Local: %v, LogLen: %v", roleName(rf.role), rf.me, rf.commitIndex, rf.lastIncludedIndex, index, rf.GlobalToLocal(index), len(rf.log))
 	rf.lastIncludedTerm = rf.log[rf.GlobalToLocal(index)].Term
 	// 3. 截断 log
-	log.Printf("%v %v(ComitIdx: %v,LastIncludIdx: %v) Start Snapshot, Idx: %v,BeforeCut: %v", roleName(rf.role), rf.me, rf.commitIndex, rf.lastIncludedIndex, index, len(rf.log))
+	// log.Printf("%v %v(ComitIdx: %v,LastIncludIdx: %v) Start Snapshot, Idx: %v,BeforeCut: %v", roleName(rf.role), rf.me, rf.commitIndex, rf.lastIncludedIndex, index, len(rf.log))
 	rf.log = rf.log[rf.GlobalToLocal(index):]
 	rf.lastIncludedIndex = index
 	if rf.lastApplied < index {
 		rf.lastApplied = index
 	}
 	// 4. 调用 persist
-	log.Printf("%v %v(ComitIdx: %v,LastIncludIdx: %v) Start Snapshot, Idx: %v,LogCutTo: %v", roleName(rf.role), rf.me, rf.commitIndex, rf.lastIncludedIndex, index, len(rf.log))
+	// log.Printf("%v %v(ComitIdx: %v,LastIncludIdx: %v) Start Snapshot, Idx: %v,LogCutTo: %v", roleName(rf.role), rf.me, rf.commitIndex, rf.lastIncludedIndex, index, len(rf.log))
 	rf.persist()
 }
 
@@ -743,7 +743,7 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 
 func (rf *Raft) sendInstallSnapshotToServer(server int) {
 	reply := InstallSnapshotReply{}
-	log.Printf("%v %v Preparing SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
+	// log.Printf("%v %v Preparing SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
 	rf.mu.Lock()
 	if rf.role != Leader {
 		rf.mu.Unlock()
@@ -758,7 +758,7 @@ func (rf *Raft) sendInstallSnapshotToServer(server int) {
 		LastIncludedCommand: rf.log[0].Command,
 		// Done: ,
 	}
-	log.Printf("%v %v SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
+	// log.Printf("%v %v SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
 	rf.mu.Unlock()
 	ok := rf.sendInstallSnapshot(server, &args, &reply)
 

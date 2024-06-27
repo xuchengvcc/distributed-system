@@ -82,7 +82,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
 	reply.Value = res.Value
-	log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
+	// log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
 }
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
@@ -100,7 +100,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	// log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -119,7 +119,7 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	// log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -229,7 +229,7 @@ func (kv *KVServer) ApplyHandler() {
 			}
 			if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate*RaftStateNumThreshold/100 {
 				//  TODO 生成快照
-				log.Printf("RaftStateSize: %v", kv.persister.RaftStateSize())
+				// log.Printf("RaftStateSize: %v", kv.persister.RaftStateSize())
 				snapshot := kv.Snapshot()
 				kv.rf.Snapshot(_log.CommandIndex, snapshot)
 			}
