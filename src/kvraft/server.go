@@ -23,6 +23,18 @@ const (
 	APPEND
 )
 
+func optype(op int) string {
+	switch op {
+	case GET:
+		return "GET"
+	case PUT:
+		return "PUT"
+	case APPEND:
+		return "APPEND"
+	}
+	return "UNKNOWN"
+}
+
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
 		log.Printf(format, a...)
@@ -82,7 +94,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
 	reply.Value = res.Value
-	// log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
+	log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
 }
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
@@ -100,7 +112,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	// log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -119,7 +131,7 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	// log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -270,17 +282,17 @@ func (kv *KVServer) LoadSnapshot(snapshot []byte) {
 	db := make(map[string]string)
 	historyDb := make(map[int]result)
 	if decoder.Decode(&db) != nil || decoder.Decode(&historyDb) != nil {
-		log.Printf("%v Decode Snapshot Failed", kv.me)
+		// log.Printf("%v Decode Snapshot Failed", kv.me)
 	} else {
 		kv.db = db
 		kv.history = historyDb
-		log.Printf("%v Decode Snapshot Successfully", kv.me)
+		// log.Printf("%v Decode Snapshot Successfully", kv.me)
 	}
 }
 
 func (kv *KVServer) DBExecute(op *Op) (res result) {
 	// 需在加锁状态下调用
-	// log.Printf("%v Get in DBExecute, IsLeader: %v, IncrId: %v, optype: %v", kv.me, isLeader, op.IncrId, op.Optype)
+	log.Printf("%v Execute DBExecute, IncrId: %v, %v(%v: %v)", kv.me, op.IncrId, optype(op.Optype), op.Key, op.Value)
 	res.LastId = op.IncrId
 	switch op.Optype {
 	case GET:

@@ -12,6 +12,8 @@ import (
 var id = 100
 var mu sync.Mutex
 
+const RPCRetryTime = time.Millisecond * 5
+
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
@@ -73,13 +75,21 @@ func (ck *Clerk) Get(key string) string {
 		reply := GetReply{}
 		// log.Printf("Clerk %v Send Get Request(Key: %v) to %v", ck.clerkId, key, ck.leader)
 		ok := ck.servers[ck.leader].Call("KVServer.Get", &args, &reply)
-		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrHandleTimeout {
+		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrLeaderChanged {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(RPCRetryTime)
 			continue
 		}
-		// switch reply.Err {
-		// 	case
-		// }
+		switch reply.Err {
+		case ErrHandleTimeout:
+			time.Sleep(RPCRetryTime)
+			continue
+		case ErrChanClosed:
+			time.Sleep(RPCRetryTime)
+			continue
+		case ErrNoKey:
+			return reply.Value
+		}
 		return reply.Value
 	}
 	// return reply.Value
@@ -105,13 +115,19 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		reply := PutAppendReply{}
 		ok := ck.servers[ck.leader].Call("KVServer."+op, &args, &reply)
 		// log.Printf("Clerk %v Send %v to %v Request(Key: %v,Value: %v), Err: %v", ck.clerkId, op, ck.leader, key, value, reply.Err)
-		if !ok || reply.Err == ErrNoKey || reply.Err == ErrWrongLeader || reply.Err == ErrHandleTimeout {
+		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrLeaderChanged {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(RPCRetryTime)
 			continue
 		}
-		// switch {
-
-		// }
+		switch reply.Err {
+		case ErrHandleTimeout:
+			time.Sleep(RPCRetryTime)
+			continue
+		case ErrChanClosed:
+			time.Sleep(RPCRetryTime)
+			continue
+		}
 		return
 	}
 

@@ -30,7 +30,7 @@ import (
 	"6.5840/labrpc"
 )
 
-const ImmidiateTime = 5
+const ImmidiateTime = 3
 const HeartbeatTime = 80
 const ElectionTimeoutRangeBottom = 150
 const ElectionTimeoutRangeTop = 300
@@ -195,7 +195,7 @@ func (rf *Raft) CommitCheck() {
 			buffer = append(buffer, message)
 			// rf.mu.Unlock()
 			// rf.applyCh <- message
-			// log.Printf("%v %v add Command %v(Idx: %v) to Buffer", roleName(rf.role), rf.me, message.Command, message.CommandIndex)
+			log.Printf("%v %v add Command %v(Idx: %v) to Buffer", roleName(rf.role), rf.me, message.Command, message.CommandIndex)
 			// rf.mu.Lock()
 		}
 		rf.mu.Unlock()
@@ -362,7 +362,7 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 	// log.Printf("%v(V: %v) << %v's requestVote", rf.me, rf.votedFor, args.CandidateId)
-	// log.Printf("%v %v(T: %v, V: %v) <<< C %v(T: %v), Try Lock", roleName(rf.role), rf.me, rf.currentTerm, rf.votedFor, args.CandidateId, args.Term)
+	log.Printf("%v %v(T: %v, V: %v) <<< C %v(T: %v), Try Lock", roleName(rf.role), rf.me, rf.currentTerm, rf.votedFor, args.CandidateId, args.Term)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// log.Printf("%v %v(T: %v, V: %v) <<< C %v(T: %v), Get Lock", roleName(rf.role), rf.me, rf.currentTerm, rf.votedFor, args.CandidateId, args.Term)
@@ -401,7 +401,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 			reply.VoteGranted = true
 			// rf.mu.Unlock()
-			// log.Printf("%v %v(T: %v, LastLogT: %v, V: %v)  V  C %v(T: %v, LastLogT: %v)\n", roleName(rf.role), rf.me, rf.currentTerm, rf.log[len(rf.log)-1].Term, rf.votedFor, args.CandidateId, args.Term, args.LastLogTerm)
+			log.Printf("%v %v(T: %v, LastLogT: %v, LastLogI: %v, V: %v)  V  C %v(T: %v, LastLogT: %v, LastLogI: %v)\n", roleName(rf.role), rf.me, rf.currentTerm, rf.log[len(rf.log)-1].Term, rf.LocalToGlobal(len(rf.log)-1), rf.votedFor, args.CandidateId, args.Term, args.LastLogTerm, args.LastLogIndex)
 			return
 		}
 	}
@@ -456,8 +456,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.role = Follower // 心跳抑制投票
 	}
 
+	reply.Term = rf.currentTerm
 	if args.Entries == nil {
-		reply.Term = rf.currentTerm
 		if args.LeaderCommit > rf.commitIndex && args.PrevLogIndex == rf.LocalToGlobal(len(rf.log)-1) && args.PrevLogTerm == rf.log[len(rf.log)-1].Term {
 			// 5. LeaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 			// 如果不加会导致 Follower 的 CommitIndex 迟迟不更新
@@ -473,6 +473,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		// 	log.Printf("%v %v Convert to F", roleName(rf.role), rf.me)
 		// }
 		rf.role = Follower
+		reply.XIndex = rf.lastIncludedIndex
 		rf.mu.Unlock()
 		reply.Success = true
 		return
@@ -486,13 +487,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.XTerm = -1
 		reply.XLen = rf.LocalToGlobal(len(rf.log)) // Log 长度
 		isConflict = true
-		// log.Printf("F %v(T: %v,LastLog: %v) doesn't contain L %v(T: %v,FirLog: %v)", rf.me, rf.currentTerm, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.Term, args.PrevLogIndex+1)
+		log.Printf("F %v(T: %v,LastLog: %v) doesn't contain L %v(T: %v,FirLog: %v)", rf.me, rf.currentTerm, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.Term, args.PrevLogIndex+1)
 	} else if args.PrevLogIndex < rf.lastIncludedIndex {
 		// PrevLogIndex 位置在 Follower 的快照中，快照部分不动，log部分的Term无法验证，因此重新复制log
 		reply.XTerm = -1
 		reply.XLen = rf.lastIncludedIndex + 1
 		isConflict = true
-
+		log.Printf("F %v(T: %v,LastIncludedLog: %v) Snapshot Contains L %v(T: %v,FirLog: %v)", rf.me, rf.currentTerm, rf.lastIncludedIndex, args.LeaderId, args.Term, args.PrevLogIndex+1)
+	} else if rf.commitIndex == args.PrevLogIndex {
+		// 排除Follower占位log的Term不匹配导致的错误
 	} else if rf.log[rf.GlobalToLocal(args.PrevLogIndex)].Term != args.PrevLogTerm {
 		// PrevLogIndex 位置的日志项存在，但term不匹配
 		reply.XTerm = rf.log[rf.GlobalToLocal(args.PrevLogIndex)].Term
@@ -503,14 +506,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.XIndex = i + 1
 		reply.XLen = rf.LocalToGlobal(len(rf.log))
 		isConflict = true
-		// log.Printf("F %v(T: %v,LastLogT: %v,LastI: %v) Conflict L %v(T: %v,PreLogT: %v,RreI: %v)", rf.me, rf.currentTerm, rf.log[rf.GlobalToLocal(args.PrevLogIndex)].Term, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.Term, args.PrevLogTerm, args.PrevLogIndex)
+		log.Printf("F %v(T: %v,LastLogT: %v,LastI: %v,LastIncludIdx: %v) Conflict L %v(T: %v,PreLogT: %v,RreI: %v)", rf.me, rf.currentTerm, rf.log[rf.GlobalToLocal(args.PrevLogIndex)].Term, rf.LocalToGlobal(len(rf.log)-1), rf.lastIncludedIndex, args.LeaderId, args.Term, args.PrevLogTerm, args.PrevLogIndex)
 	}
 
 	if isConflict {
 		// 2. Reply false log doesn't contain an entry at prevLogIndex whose term mathces prevLogTerm
 		reply.Term = rf.currentTerm
-		rf.mu.Unlock()
 		reply.Success = false
+		rf.mu.Unlock()
 		return
 	}
 
@@ -546,21 +549,21 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 	reply := &AppendEntriesReply{}
 	ok := rf.sendAppendEntries(server, args, reply)
 	if !ok {
-		// log.Printf("Connect fail From %v >>> %v", rf.me, server)
+		log.Printf("Connect fail From %v >>> %v", rf.me, server)
 		return
 	}
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// log.Printf("L %v sendAppendEntriesToServer get the Lock %v", rf.me, server)
 	// defer rf.mu.Unlock()
 	if args.Term != rf.currentTerm {
 		// 可能发送心跳期间，任期更改
-		rf.mu.Unlock()
 		return
 	}
 
 	if reply.Success {
-		// log.Printf("Update %v matchIdx %v > %v, nextIdx %v > %v", server, rf.matchIndex[server], args.PrevLogIndex+len(args.Entries), rf.nextIndex[server], args.PrevLogIndex+len(args.Entries)+1)
-		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+		log.Printf("Update %v matchIdx %v > %v, nextIdx %v > %v", server, rf.matchIndex[server], args.PrevLogIndex+len(args.Entries), rf.nextIndex[server], args.PrevLogIndex+len(args.Entries)+1)
+		rf.matchIndex[server] = max(rf.matchIndex[server], args.PrevLogIndex+len(args.Entries))
 		rf.nextIndex[server] = rf.matchIndex[server] + 1
 		if rf.lastIncludedIndex > reply.XIndex {
 			go rf.sendInstallSnapshotToServer(server)
@@ -588,10 +591,6 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 			}
 			commitLastLog--
 		}
-		func() {
-			rf.mu.Unlock()
-			// log.Printf("%v %v Unlock in Check log for Commit", roleName(rf.role), rf.me)
-		}()
 		return
 	}
 
@@ -604,84 +603,115 @@ func (rf *Raft) sendAppendEntriesToServer(server int, args *AppendEntriesArgs) {
 		rf.role = Follower
 		rf.heartbeatTimeStamp = time.Now()
 		// rf.ResetHeartTimer(HeartbeatTimeThreshold())
-	}
-
-	rf.mu.Unlock()
-	for !reply.Success {
-		// 快速重试机制
-		// 按 Term 向前找到冲突的log的Term，将从个Term开始到最后的所有Entry重新发送，以减少RPC重试
-		rf.mu.Lock()
-		if reply.Term == rf.currentTerm && rf.role == Leader {
-			// 复制log失败，但Term相同，且自己仍为Leader，说明Follower日志在prevLogIndex位置没有与prevLogTerm匹配的项
-			// log.Printf("Quick retry L %v(T: %v,PreLogIdx: %v) >>> F %v", rf.me, rf.currentTerm, args.PrevLogIndex, server)
-			if reply.XTerm == -1 {
-				// PrevLogIndex 这个位置在 Follower 不存在
-				// log.Printf("F %v() lack log, PreLogIdx back to %v", server, reply.XLen)
-				if rf.lastIncludedIndex >= reply.XLen {
-					rf.mu.Unlock()
-					go rf.sendInstallSnapshotToServer(server) // (a) Follower 日志过短，短于lastIncludedIndex，即缺少快照中包含的日志
-					return
-				}
-				rf.nextIndex[server] = reply.XLen
+	} else if reply.Term == rf.currentTerm && rf.role == Leader {
+		log.Printf("%v %v(LastIncludIdx %v) Conflict %v Reply(T %v,XT %v,XL %v,XI %v)", roleName(rf.role), rf.me, rf.lastIncludedIndex, server, reply.Term, reply.XTerm, reply.XLen, reply.XIndex)
+		if reply.XTerm == -1 {
+			if rf.lastIncludedTerm >= reply.XLen {
+				// 缺失的log在Leader的Snapshot中
+				rf.nextIndex[server] = rf.lastIncludedIndex
 			} else {
-				i := rf.nextIndex[server] - 1
-				if i < rf.lastIncludedIndex {
-					i = rf.lastIncludedIndex
-				}
-				for i > rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.XTerm {
-					i--
-				}
-				if i == rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.XTerm {
-					rf.mu.Unlock()
-					go rf.sendInstallSnapshotToServer(server) // (b) Follower 日志冲突，回退时发现冲突包含在快照中
-					return
-				} else if rf.log[rf.GlobalToLocal(i)].Term == reply.XTerm {
-					// PrevLogIndex 发生冲突的位置，Follower 的 Term Leader也有
-					// log.Printf("F %v Conflict L %v(ConfT: %v) SameTerm", server, rf.me, reply.XTerm)
-					rf.nextIndex[server] = i + 1
-				} else {
-					// PrevLogIndex 发生冲突的位置，Leader 没有该 Follower 的冲突Term
-					// log.Printf("F %v(nextIdx: %v) Conflict L %v(ConfI: %v,LastIncludedIdx: %v) NoTerm", server, rf.nextIndex[server], rf.me, reply.XIndex, rf.lastIncludedIndex)
-					if reply.XIndex <= rf.lastIncludedIndex {
-						rf.mu.Unlock()
-						go rf.sendInstallSnapshotToServer(server) // (c) nextIndex中的记录索引包含在了快照内
-						return
-					} else {
-						rf.nextIndex[server] = reply.XIndex + 1
-					}
-				}
+				rf.nextIndex[server] = reply.XLen
 			}
-			args.Entries = rf.log[rf.GlobalToLocal(rf.nextIndex[server]):]
-			args.PrevLogIndex = rf.nextIndex[server] - 1
-			args.PrevLogTerm = rf.log[rf.GlobalToLocal(rf.nextIndex[server]-1)].Term
-
-			if args.Entries == nil {
-				rf.mu.Unlock()
-				return
-			}
-			rf.mu.Unlock()
-			// 此处需要解锁，否则可能导致死锁
-			ok2 := rf.sendAppendEntries(server, args, reply)
-			if reply.Success {
-				rf.mu.Lock()
-				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
-				rf.nextIndex[server] = rf.matchIndex[server] + 1
-				rf.mu.Unlock()
-			}
-			if !ok2 {
-				return
-			}
-		} else {
-			rf.mu.Unlock()
+			log.Printf("%v %v(LastIncludIdx: %v) Reset %v(NextIdx >>> %v, Xlen: %v), ", roleName(rf.role), rf.me, rf.lastIncludedIndex, server, rf.nextIndex[server], reply.XLen)
 			return
 		}
-		time.Sleep(CheckTimeInter * time.Millisecond)
+
+		i := rf.nextIndex[server] - 1
+		if i < rf.lastIncludedIndex {
+			i = rf.lastIncludedIndex
+		}
+		for i > rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.Term {
+			i--
+		}
+		if i == rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.Term {
+			rf.nextIndex[server] = rf.lastIncludedIndex
+		} else if rf.log[rf.GlobalToLocal(i)].Term == reply.Term {
+			rf.nextIndex[server] = i + 1
+		} else {
+			if reply.XIndex <= rf.lastIncludedIndex {
+				rf.nextIndex[server] = rf.lastIncludedIndex
+			} else {
+				rf.nextIndex[server] = reply.XIndex
+			}
+		}
+		// rf.ResetHeartTimer(ImmidiateTime)
 	}
+
+	// for !reply.Success {
+	// 	// 快速重试机制
+	// 	// 按 Term 向前找到冲突的log的Term，将从个Term开始到最后的所有Entry重新发送，以减少RPC重试
+	// 	rf.mu.Lock()
+	// 	if reply.Term == rf.currentTerm && rf.role == Leader {
+	// 		// 复制log失败，但Term相同，且自己仍为Leader，说明Follower日志在prevLogIndex位置没有与prevLogTerm匹配的项
+	// 		// log.Printf("Quick retry L %v(T: %v,PreLogIdx: %v) >>> F %v", rf.me, rf.currentTerm, args.PrevLogIndex, server)
+	// 		if reply.XTerm == -1 {
+	// 			// PrevLogIndex 这个位置在 Follower 不存在
+	// 			// log.Printf("F %v() lack log, PreLogIdx back to %v", server, reply.XLen)
+	// 			if rf.lastIncludedIndex >= reply.XLen {
+	// 				rf.mu.Unlock()
+	// 				go rf.sendInstallSnapshotToServer(server) // (a) Follower 日志过短，短于lastIncludedIndex，即缺少快照中包含的日志
+	// 				return
+	// 			}
+	// 			rf.nextIndex[server] = reply.XLen
+	// 		} else {
+	// 			i := rf.nextIndex[server] - 1
+	// 			if i < rf.lastIncludedIndex {
+	// 				i = rf.lastIncludedIndex
+	// 			}
+	// 			for i > rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.XTerm {
+	// 				i--
+	// 			}
+	// 			if i == rf.lastIncludedIndex && rf.log[rf.GlobalToLocal(i)].Term > reply.XTerm {
+	// 				rf.mu.Unlock()
+	// 				go rf.sendInstallSnapshotToServer(server) // (b) Follower 日志冲突，回退时发现冲突包含在快照中
+	// 				return
+	// 			} else if rf.log[rf.GlobalToLocal(i)].Term == reply.XTerm {
+	// 				// PrevLogIndex 发生冲突的位置，Follower 的 Term Leader也有
+	// 				// log.Printf("F %v Conflict L %v(ConfT: %v) SameTerm", server, rf.me, reply.XTerm)
+	// 				rf.nextIndex[server] = i + 1
+	// 			} else {
+	// 				// PrevLogIndex 发生冲突的位置，Leader 没有该 Follower 的冲突Term
+	// 				// log.Printf("F %v(nextIdx: %v) Conflict L %v(ConfI: %v,LastIncludedIdx: %v) NoTerm", server, rf.nextIndex[server], rf.me, reply.XIndex, rf.lastIncludedIndex)
+	// 				if reply.XIndex <= rf.lastIncludedIndex {
+	// 					rf.mu.Unlock()
+	// 					go rf.sendInstallSnapshotToServer(server) // (c) nextIndex中的记录索引包含在了快照内
+	// 					return
+	// 				} else {
+	// 					rf.nextIndex[server] = reply.XIndex + 1
+	// 				}
+	// 			}
+	// 		}
+	// 		args.Entries = rf.log[rf.GlobalToLocal(rf.nextIndex[server]):]
+	// 		args.PrevLogIndex = rf.nextIndex[server] - 1
+	// 		args.PrevLogTerm = rf.log[rf.GlobalToLocal(rf.nextIndex[server]-1)].Term
+
+	// 		if args.Entries == nil {
+	// 			rf.mu.Unlock()
+	// 			return
+	// 		}
+	// 		rf.mu.Unlock()
+	// 		// 此处需要解锁，否则可能导致死锁
+	// 		ok2 := rf.sendAppendEntries(server, args, reply)
+	// 		if reply.Success {
+	// 			rf.mu.Lock()
+	// 			rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+	// 			rf.nextIndex[server] = rf.matchIndex[server] + 1
+	// 			rf.mu.Unlock()
+	// 		}
+	// 		if !ok2 {
+	// 			return
+	// 		}
+	// 	} else {
+	// 		rf.mu.Unlock()
+	// 		return
+	// 	}
+	// 	time.Sleep(CheckTimeInter * time.Millisecond)
+	// }
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-	// log.Printf("Snapshot %v %v(LastLogI: %v) <<< L %v(LastIncludedIdx: %v)", roleName(rf.role), rf.me, rf.LocalToGlobal(len(rf.log)-1), args.LeaderId, args.LastIncludedIndex)
+	log.Printf("Snapshot %v %v(LastIncludedIdx: %v) <<< L %v(LastIncludedIdx: %v)", roleName(rf.role), rf.me, rf.lastIncludedIndex, args.LeaderId, args.LastIncludedIndex)
 	defer func() {
 		rf.heartbeatTimeStamp = time.Now()
 		// rf.ResetHeartTimer(HeartbeatTimeThreshold())
@@ -758,7 +788,7 @@ func (rf *Raft) sendInstallSnapshotToServer(server int) {
 		LastIncludedCommand: rf.log[0].Command,
 		// Done: ,
 	}
-	// log.Printf("%v %v SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
+	log.Printf("%v %v SendInstallSnapshotTo %v", roleName(rf.role), rf.me, server)
 	rf.mu.Unlock()
 	ok := rf.sendInstallSnapshot(server, &args, &reply)
 
@@ -779,7 +809,8 @@ func (rf *Raft) sendInstallSnapshotToServer(server int) {
 		rf.persist()
 		return
 	}
-	rf.nextIndex[server] = rf.LocalToGlobal(1)
+	log.Printf("%v %v Reset Server %v NextIdx %v >>> %v", roleName(rf.role), rf.me, server, rf.nextIndex[server], max(rf.LocalToGlobal(1), rf.nextIndex[server]))
+	rf.nextIndex[server] = max(rf.LocalToGlobal(1), rf.nextIndex[server])
 }
 
 func (rf *Raft) StartSendAppendEntries() {
@@ -810,11 +841,11 @@ func (rf *Raft) StartSendAppendEntries() {
 			installSnapshot := false
 
 			if args.PrevLogIndex < rf.lastIncludedIndex {
-				// log.Printf("InstallSnapshot L %v(LastIncludedIdx: %v) >>> %v(PrevLogIdx: %v)", rf.me, rf.lastIncludedIndex, i, args.PrevLogIndex)
+				log.Printf("InstallSnapshot L %v(LastIncludedIdx: %v) >>> %v(PrevLogIdx: %v,NextIdx: %v) ", rf.me, rf.lastIncludedIndex, i, args.PrevLogIndex, rf.nextIndex[i])
 				installSnapshot = true
 			} else if rf.LocalToGlobal(len(rf.log)-1) > args.PrevLogIndex {
 				args.Entries = rf.log[rf.GlobalToLocal(rf.nextIndex[i]):]
-				// log.Printf("AppendEntries: L %v(T: %v,I: %v) >>> F %v\n", rf.me, rf.currentTerm, rf.nextIndex[i], i)
+				log.Printf("AppendEntries: L %v(T: %v,I: %v) >>> F %v\n", rf.me, rf.currentTerm, rf.nextIndex[i], i)
 			}
 			// else {
 			// log.Printf("Heartbeat: L %v(T: %v) >>> F %v Now: %v", rf.me, rf.currentTerm, i, time.Now())
