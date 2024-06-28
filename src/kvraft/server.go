@@ -94,7 +94,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	res := kv.HandleOp(opArgs)
 	reply.Err = res.Err
 	reply.Value = res.Value
-	log.Printf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
+	DPrintf("%v Get( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, res.Value)
 }
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
@@ -112,7 +112,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	DPrintf("%v Put( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -131,7 +131,7 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 		Value:   args.Value,
 	}
 	res := kv.HandleOp(opArgs)
-	log.Printf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
+	DPrintf("%v Append( %v) Result(Err: %v, Key: %v, Value: %v)", kv.me, args.IncrId, res.Err, args.Key, args.Value)
 	reply.Err = res.Err
 }
 
@@ -150,7 +150,7 @@ func (kv *KVServer) HandleOp(opArgs *Op) result {
 	kv.mu.Lock()
 	newCh := make(chan result)
 	kv.waitCh[sIdx] = &newCh
-	// log.Printf("L %v Clerk %v IncrId %v create new Channel %p", kv.me, opArgs.ClerkId, opArgs.IncrId, &newCh)
+	// DPrintf("L %v Clerk %v IncrId %v create new Channel %p", kv.me, opArgs.ClerkId, opArgs.IncrId, &newCh)
 	kv.mu.Unlock()
 
 	defer func() {
@@ -162,19 +162,19 @@ func (kv *KVServer) HandleOp(opArgs *Op) result {
 
 	select {
 	case <-time.After(HandleTimeout):
-		log.Printf("L %v Clerk %v IncrId %v Timeout", kv.me, opArgs.ClerkId, opArgs.IncrId)
+		DPrintf("L %v Clerk %v IncrId %v Timeout", kv.me, opArgs.ClerkId, opArgs.IncrId)
 		return result{Err: ErrHandleTimeout}
 	case msg, success := <-newCh:
 		if success && msg.ResTerm == sTerm {
-			// log.Printf("%v HandleOp Successful, ResTerm %v, Value: %v, Err: %v, LastId: %v", kv.me, msg.ResTerm, msg.Value, msg.Err, msg.LastId)
+			// DPrintf("%v HandleOp Successful, ResTerm %v, Value: %v, Err: %v, LastId: %v", kv.me, msg.ResTerm, msg.Value, msg.Err, msg.LastId)
 			return msg
 		} else if !success {
 			// 通道关闭
-			log.Printf("L %v Clerk %v IncrId %v Channel Close", kv.me, opArgs.ClerkId, opArgs.IncrId)
+			DPrintf("L %v Clerk %v IncrId %v Channel Close", kv.me, opArgs.ClerkId, opArgs.IncrId)
 			return result{Err: ErrChanClosed}
 		} else {
 			// 任期变更
-			log.Printf("L %v Clerk %v IncrId %v Leader Changed", kv.me, opArgs.ClerkId, opArgs.IncrId)
+			DPrintf("L %v Clerk %v IncrId %v Leader Changed", kv.me, opArgs.ClerkId, opArgs.IncrId)
 			return result{Err: ErrLeaderChanged, Value: ""}
 		}
 	}
@@ -188,10 +188,10 @@ func (kv *KVServer) ApplyHandler() {
 		if _log.CommandValid {
 			op, ok := _log.Command.(Op)
 			if !ok {
-				log.Printf("L %v: Raft Log Convert Failed, Type Incompact", kv.me)
+				DPrintf("L %v: Raft Log Convert Failed, Type Incompact", kv.me)
 			}
 			// else {
-			// 	log.Printf("L %v: Get the Command Successful", kv.me)
+			// 	DPrintf("L %v: Get the Command Successful", kv.me)
 			// }
 			kv.mu.Lock()
 			if _log.CommandIndex <= kv.lastApplied {
@@ -214,7 +214,7 @@ func (kv *KVServer) ApplyHandler() {
 			}
 			// _, isLeader := kv.rf.GetState()
 			if need {
-				// log.Printf("%v DBExecute, IsLeader: %v", kv.me, isLeader)
+				// DPrintf("%v DBExecute, IsLeader: %v", kv.me, isLeader)
 				res = kv.DBExecute(&op)
 				res.ResTerm = _log.SnapshotTerm
 				kv.history[op.ClerkId] = res // 更新历史
@@ -231,7 +231,7 @@ func (kv *KVServer) ApplyHandler() {
 				func() {
 					defer func() {
 						if recover() != nil {
-							log.Printf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
+							DPrintf("L %v ApplyHandler Find Clerk %v IncrId %v Channel Closed", kv.me, op.ClerkId, op.IncrId)
 						}
 					}()
 					res.ResTerm = _log.SnapshotTerm
@@ -241,7 +241,7 @@ func (kv *KVServer) ApplyHandler() {
 			}
 			if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate*RaftStateNumThreshold/100 {
 				//  TODO 生成快照
-				// log.Printf("RaftStateSize: %v", kv.persister.RaftStateSize())
+				// DPrintf("RaftStateSize: %v", kv.persister.RaftStateSize())
 				snapshot := kv.Snapshot()
 				kv.rf.Snapshot(_log.CommandIndex, snapshot)
 			}
@@ -272,7 +272,7 @@ func (kv *KVServer) Snapshot() []byte {
 
 func (kv *KVServer) LoadSnapshot(snapshot []byte) {
 	if snapshot == nil || len(snapshot) < 1 {
-		log.Printf("%v Snapshot is Empty", kv.me)
+		DPrintf("%v Snapshot is Empty", kv.me)
 		return
 	}
 
@@ -282,17 +282,17 @@ func (kv *KVServer) LoadSnapshot(snapshot []byte) {
 	db := make(map[string]string)
 	historyDb := make(map[int]result)
 	if decoder.Decode(&db) != nil || decoder.Decode(&historyDb) != nil {
-		// log.Printf("%v Decode Snapshot Failed", kv.me)
+		// DPrintf("%v Decode Snapshot Failed", kv.me)
 	} else {
 		kv.db = db
 		kv.history = historyDb
-		// log.Printf("%v Decode Snapshot Successfully", kv.me)
+		// DPrintf("%v Decode Snapshot Successfully", kv.me)
 	}
 }
 
 func (kv *KVServer) DBExecute(op *Op) (res result) {
 	// 需在加锁状态下调用
-	log.Printf("%v Execute DBExecute, IncrId: %v, %v(%v: %v)", kv.me, op.IncrId, optype(op.Optype), op.Key, op.Value)
+	DPrintf("%v Execute DBExecute, IncrId: %v, %v(%v: %v)", kv.me, op.IncrId, optype(op.Optype), op.Key, op.Value)
 	res.LastId = op.IncrId
 	switch op.Optype {
 	case GET:

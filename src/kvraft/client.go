@@ -77,7 +77,7 @@ func (ck *Clerk) Get(key string) string {
 		ok := ck.servers[ck.leader].Call("KVServer.Get", &args, &reply)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrLeaderChanged {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
-			time.Sleep(RPCRetryTime)
+			// time.Sleep(RPCRetryTime)
 			continue
 		}
 		switch reply.Err {
@@ -117,7 +117,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		// log.Printf("Clerk %v Send %v to %v Request(Key: %v,Value: %v), Err: %v", ck.clerkId, op, ck.leader, key, value, reply.Err)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrLeaderChanged {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
-			time.Sleep(RPCRetryTime)
+			// time.Sleep(RPCRetryTime)
 			continue
 		}
 		switch reply.Err {
