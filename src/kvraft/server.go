@@ -148,7 +148,7 @@ func (kv *KVServer) HandleOp(opArgs *Op) result {
 	}
 
 	kv.mu.Lock()
-	newCh := make(chan result)
+	newCh := make(chan result, 1)
 	kv.waitCh[sIdx] = &newCh
 	// DPrintf("L %v Clerk %v IncrId %v create new Channel %p", kv.me, opArgs.ClerkId, opArgs.IncrId, &newCh)
 	kv.mu.Unlock()
@@ -227,7 +227,7 @@ func (kv *KVServer) ApplyHandler() {
 			// Leader 需要额外通知handler处理clerk回复
 			ch, exist := kv.waitCh[_log.CommandIndex]
 			if exist {
-				kv.mu.Unlock()
+				// kv.mu.Unlock()
 				func() {
 					defer func() {
 						if recover() != nil {
@@ -237,7 +237,7 @@ func (kv *KVServer) ApplyHandler() {
 					res.ResTerm = _log.SnapshotTerm
 					*ch <- res
 				}()
-				kv.mu.Lock()
+				// kv.mu.Lock()
 			}
 			if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate*RaftStateNumThreshold/100 {
 				//  TODO 生成快照

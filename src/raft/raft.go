@@ -536,8 +536,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			ridx := rf.GlobalToLocal(args.PrevLogIndex) + 1 + idx
 			if ridx < len(rf.log) && rf.log[ridx].Term != log.Term {
 				DPrintf("%v: Remove Logs After(T:%v,I:%v,Val:%v)", rf.me, rf.log[ridx].Term, args.PrevLogIndex+1+idx, rf.log[ridx].Command)
-				rf.log = rf.log[:ridx]
-				rf.log = append(rf.log, args.Entries[idx:]...)
+				// rf.log = rf.log[:ridx]
+				rf.log = append(rf.log[:ridx], args.Entries[idx:]...)
 				// DPrintf("%v %v Append New Entries From %v: First(T:%v,I:%v,Val:%v) - Last(T:%v,I:%v,Val:%v)", roleName(rf.role), rf.me, args.LeaderId, rf.log[rf.GlobalToLocal(args.PrevLogIndex+1)].Term, rf.GlobalToLocal(args.PrevLogIndex+1), args.Entries[0].Command, rf.log[len(rf.log)-1].Term, rf.LocalToGlobal(len(rf.log)-1), rf.log[len(rf.log)-1].Command)
 				break
 			} else if ridx == len(rf.log) {
@@ -795,7 +795,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	} else {
 		// DPrintf("%v %v don't has Log in Snapshot, Clear Log", roleName(rf.role), rf.me)
 		rf.log = make([]Entry, 0)
-		rf.log = append(rf.log, Entry{Term: rf.lastIncludedTerm, Command: args.LastIncludedCommand})
+		rf.log = append(rf.log, Entry{Term: args.LastIncludedTerm, Command: args.LastIncludedCommand})
 	}
 
 	rf.snapShot = args.Data
@@ -889,7 +889,7 @@ func (rf *Raft) StartSendAppendEntries() {
 				Term:         rf.currentTerm,
 				LeaderId:     rf.me,
 				PrevLogIndex: rf.nextIndex[i] - 1,
-				PrevLogTerm:  rf.log[rf.GlobalToLocal(rf.nextIndex[i]-1)].Term,
+				// PrevLogTerm:  rf.log[rf.GlobalToLocal(rf.nextIndex[i]-1)].Term,
 				LeaderCommit: rf.commitIndex,
 			}
 			// 判断发送 InstallSnapshot 还是 Heartbeat/AppendEntries
@@ -900,7 +900,8 @@ func (rf *Raft) StartSendAppendEntries() {
 				installSnapshot = true
 			} else if rf.LocalToGlobal(len(rf.log)-1) > args.PrevLogIndex {
 				// 测试是否应该在复制 log 时检查leader任期和最后一个日志的任期是否相同，
-				args.Entries = rf.log[rf.GlobalToLocal(rf.nextIndex[i]):]
+				args.Entries = append([]Entry{}, rf.log[rf.GlobalToLocal(rf.nextIndex[i]):]...)
+				// args.Entries = rf.log[rf.GlobalToLocal(rf.nextIndex[i]):]
 				DPrintf("AppendEntries: L %v(T: %v,I: %v) >>> F %v\n", rf.me, rf.currentTerm, rf.nextIndex[i], i)
 			}
 			// else {
